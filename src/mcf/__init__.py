@@ -10,11 +10,10 @@ Example:
     ...     print(f"{job.title} - {job.salary.display}")
 """
 
-from mcf.lib.api.client import MCFClient, MCFAPIError, MCFClientError
+from mcf.lib.api.client import MCFClient, MCFAPIError, MCFClientError, JobPosition
 from mcf.lib.models.models import (
     JobPosting,
     JobSearchResponse,
-    SearchFilters,
     CommonMetadata,
 )
 
@@ -23,8 +22,8 @@ __all__ = [
     "MCFClient",
     "MCFAPIError",
     "MCFClientError",
+    "JobPosition",
     "JobPosting",
     "JobSearchResponse",
-    "SearchFilters",
     "CommonMetadata",
 ]

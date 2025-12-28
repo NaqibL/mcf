@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import httpx
@@ -9,18 +11,44 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from mcf.lib.models.models import (
     CommonMetadata,
+    JobPosting,
     JobSearchResponse,
     ProfileResponse,
-    SearchFilters,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+
+@dataclass
+class JobPosition:
+    """Position info for a job in iteration."""
+
+    job_index: int
+    """Current job index (1-indexed)."""
+
+    total_jobs: int
+    """Total jobs available."""
+
+    page: int
+    """Current page (0-indexed)."""
+
+    total_pages: int
+    """Total pages available."""
+
+    page_index: int
+    """Index within current page (1-indexed)."""
+
+    page_size: int
+    """Jobs in current page."""
+
 # API endpoints
 BASE_URL = "https://api.mycareersfuture.gov.sg"
 SEARCH_URL = f"{BASE_URL}/v2/search"
 PROFILE_URL = f"{BASE_URL}/profile"
+
+# Default rate limit (requests per second)
+DEFAULT_RATE_LIMIT = 5.0
 
 # Default headers required by the API
 DEFAULT_HEADERS = {
@@ -101,16 +129,24 @@ class MCFClient:
         ...     print(job.title, job.salary.display)
     """
 
-    def __init__(self, timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        timeout: float = 30.0,
+        rate_limit: float | None = DEFAULT_RATE_LIMIT,
+    ) -> None:
         """Initialize the MCF client.
 
         Args:
             timeout: Request timeout in seconds.
+            rate_limit: Max requests per second (None to disable).
         """
         self._client = httpx.Client(
             headers=DEFAULT_HEADERS,
             timeout=timeout,
         )
+        self._rate_limit = rate_limit
+        self._last_request_time: float = 0
+        self._request_count: int = 0
 
     def __enter__(self) -> MCFClient:
         return self
@@ -121,6 +157,21 @@ class MCFClient:
     def close(self) -> None:
         """Close the HTTP client."""
         self._client.close()
+
+    @property
+    def request_count(self) -> int:
+        """Number of requests made by this client."""
+        return self._request_count
+
+    def _wait_for_rate_limit(self) -> None:
+        """Wait if necessary to respect rate limit."""
+        if self._rate_limit is None or self._rate_limit <= 0:
+            return
+
+        min_interval = 1.0 / self._rate_limit
+        elapsed = time.monotonic() - self._last_request_time
+        if elapsed < min_interval:
+            time.sleep(min_interval - elapsed)
 
     @retry(
         stop=stop_after_attempt(3),
@@ -133,7 +184,11 @@ class MCFClient:
         url: str,
         **kwargs: object,
     ) -> httpx.Response:
-        """Make an HTTP request with retry logic."""
+        """Make an HTTP request with retry logic and rate limiting."""
+        self._wait_for_rate_limit()
+        self._last_request_time = time.monotonic()
+        self._request_count += 1
+
         response = self._client.request(method, url, **kwargs)
         if response.status_code >= 400:
             raise MCFAPIError(response.status_code, response.text)
@@ -143,21 +198,13 @@ class MCFClient:
         self,
         keywords: str | None = None,
         *,
-        salary_min: int | None = None,
-        salary_max: int | None = None,
-        employment_types: list[str] | None = None,
-        categories: list[str] | None = None,
         page: int = 0,
-        limit: int = 20,
+        limit: int = 100,
     ) -> JobSearchResponse:
         """Search for job postings.
 
         Args:
             keywords: Search keywords (job title, skills, etc.).
-            salary_min: Minimum salary filter.
-            salary_max: Maximum salary filter.
-            employment_types: Filter by employment types (e.g., ["Full Time"]).
-            categories: Filter by job categories.
             page: Page number (0-indexed).
             limit: Number of results per page (max 100).
 
@@ -167,13 +214,11 @@ class MCFClient:
         Raises:
             MCFAPIError: If the API returns an error.
         """
-        # Build query parameters
         params: dict[str, str | int] = {
             "limit": min(limit, 100),
             "page": page,
         }
 
-        # Build request body
         body: dict[str, object] = {
             "sessionId": "",
             "postingCompany": [],
@@ -181,20 +226,6 @@ class MCFClient:
 
         if keywords:
             body["search"] = keywords
-
-        if salary_min is not None:
-            body["salary"] = body.get("salary", {})
-            body["salary"]["minimum"] = salary_min  # type: ignore[index]
-
-        if salary_max is not None:
-            body["salary"] = body.get("salary", {})
-            body["salary"]["maximum"] = salary_max  # type: ignore[index]
-
-        if employment_types:
-            body["employmentTypes"] = employment_types
-
-        if categories:
-            body["categories"] = categories
 
         response = self._request(
             "POST",
@@ -204,48 +235,50 @@ class MCFClient:
         )
         return JobSearchResponse.model_validate(response.json())
 
-    def search_jobs_iter(
+    def iter_jobs(
         self,
         keywords: str | None = None,
         *,
-        salary_min: int | None = None,
-        salary_max: int | None = None,
-        employment_types: list[str] | None = None,
-        categories: list[str] | None = None,
-        limit: int = 20,
-        max_pages: int | None = None,
-    ) -> Iterator[JobSearchResponse]:
-        """Iterate through all pages of job search results.
+        limit: int = 100,
+        max_jobs: int | None = None,
+    ) -> Iterator[tuple[JobPosting, JobPosition]]:
+        """Iterate through individual job postings with position info.
 
         Args:
             keywords: Search keywords.
-            salary_min: Minimum salary filter.
-            salary_max: Maximum salary filter.
-            employment_types: Filter by employment types.
-            categories: Filter by job categories.
             limit: Results per page.
-            max_pages: Maximum number of pages to fetch (None for all).
+            max_jobs: Maximum total jobs to fetch (None for all).
 
         Yields:
-            JobSearchResponse for each page.
+            Tuple of (JobPosting, JobPosition) for each job.
+
+        Example:
+            >>> for job, pos in client.iter_jobs("python", max_jobs=50):
+            ...     print(f"[{pos.job_index}/{pos.total_jobs}] {job.title}")
         """
         page = 0
+        job_index = 0
+
         while True:
-            if max_pages is not None and page >= max_pages:
-                break
+            response = self.search_jobs(keywords=keywords, page=page, limit=limit)
+            total_pages = (response.total + limit - 1) // limit
 
-            response = self.search_jobs(
-                keywords=keywords,
-                salary_min=salary_min,
-                salary_max=salary_max,
-                employment_types=employment_types,
-                categories=categories,
-                page=page,
-                limit=limit,
-            )
-            yield response
+            for i, job in enumerate(response.results, 1):
+                job_index += 1
 
-            # Check if there are more pages
+                pos = JobPosition(
+                    job_index=job_index,
+                    total_jobs=response.total,
+                    page=page,
+                    total_pages=total_pages,
+                    page_index=i,
+                    page_size=len(response.results),
+                )
+                yield job, pos
+
+                if max_jobs is not None and job_index >= max_jobs:
+                    return
+
             if not response.results or (page + 1) * limit >= response.total:
                 break
             page += 1
@@ -267,12 +300,4 @@ class MCFClient:
         response = self._request("POST", PROFILE_URL, json=body)
         profile = ProfileResponse.model_validate(response.json())
         return profile.data.common
-
-    def get_filters(self) -> SearchFilters:
-        """Get default search filters.
-
-        Returns:
-            SearchFilters with default values.
-        """
-        return SearchFilters()
 

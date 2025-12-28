@@ -147,14 +147,6 @@ def search(
         Optional[str],
         typer.Argument(help="Search keywords (job title, skills, company)"),
     ] = None,
-    salary_min: Annotated[
-        Optional[int],
-        typer.Option("--min", "-m", help="Minimum monthly salary"),
-    ] = None,
-    salary_max: Annotated[
-        Optional[int],
-        typer.Option("--max", "-M", help="Maximum monthly salary"),
-    ] = None,
     page: Annotated[
         int,
         typer.Option("--page", "-p", help="Page number (starts at 0)"),
@@ -162,7 +154,7 @@ def search(
     limit: Annotated[
         int,
         typer.Option("--limit", "-l", help="Results per page (max 100)"),
-    ] = 20,
+    ] = 100,
     show_urls: Annotated[
         bool,
         typer.Option("--urls", "-u", help="Show job URLs in table"),
@@ -178,17 +170,15 @@ def search(
 
         mcf search "python developer"
 
-        mcf search --min 5000 --max 10000
+        mcf search --page 2 --limit 50
 
-        mcf search "data engineer" --min 8000 --urls
+        mcf search "data engineer" --urls
     """
     try:
         with console.status("[cyan]Searching jobs...[/cyan]", spinner="dots"):
             client = MCFClient()
             response = client.search_jobs(
                 keywords=keywords,
-                salary_min=salary_min,
-                salary_max=salary_max,
                 page=page,
                 limit=limit,
             )

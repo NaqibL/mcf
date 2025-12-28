@@ -5,7 +5,6 @@ from mcf.lib.models.models import (
     CommonMetadata,
     JobPosting,
     JobSearchResponse,
-    SearchFilters,
 )
 
 __all__ = [
@@ -13,6 +12,5 @@ __all__ = [
     "CommonMetadata",
     "JobPosting",
     "JobSearchResponse",
-    "SearchFilters",
 ]
 

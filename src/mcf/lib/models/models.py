@@ -317,23 +317,3 @@ class ProfileResponse(BaseModel):
 
     data: ProfileData
 
-
-# ============================================================================
-# Search Request Models
-# ============================================================================
-
-
-class SearchFilters(BaseModel):
-    """Filters for job search."""
-
-    keywords: str | None = None
-    salary_min: int | None = None
-    salary_max: int | None = None
-    employment_types: list[str] | None = None
-    categories: list[str] | None = None
-    posting_company: list[str] | None = None
-    page: int = 0
-    limit: int = 20
-
-    model_config = {"populate_by_name": True}
-
