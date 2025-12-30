@@ -7,10 +7,12 @@ import time
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from mcf.lib.models.job_detail import JobDetail
 from mcf.lib.models.models import SearchResponse
 
 BASE_URL = "https://api.mycareersfuture.gov.sg"
 SEARCH_URL = f"{BASE_URL}/v2/search"
+JOBS_URL = f"{BASE_URL}/v2/jobs"
 
 DEFAULT_RATE_LIMIT = 5.0
 
@@ -102,3 +104,10 @@ class MCFClient:
 
         response = self._request("POST", SEARCH_URL, params=params, json=body)
         return SearchResponse.model_validate(response.json())
+
+    def get_job_detail(self, uuid: str) -> JobDetail:
+        """Get job details by UUID."""
+        url = f"{JOBS_URL}/{uuid}"
+        params = {"updateApplicationCount": "true"}
+        response = self._request("GET", url, params=params)
+        return JobDetail.model_validate(response.json())
