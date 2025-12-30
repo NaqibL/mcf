@@ -7,12 +7,14 @@ import time
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from mcf.lib.models.company import CompanySearchResponse
 from mcf.lib.models.job_detail import JobDetail
 from mcf.lib.models.models import SearchResponse
 
 BASE_URL = "https://api.mycareersfuture.gov.sg"
 SEARCH_URL = f"{BASE_URL}/v2/search"
 JOBS_URL = f"{BASE_URL}/v2/jobs"
+COMPANIES_URL = f"{BASE_URL}/v2/companies"
 
 DEFAULT_RATE_LIMIT = 5.0
 
@@ -111,3 +113,25 @@ class MCFClient:
         params = {"updateApplicationCount": "true"}
         response = self._request("GET", url, params=params)
         return JobDetail.model_validate(response.json())
+
+    def search_companies(
+        self,
+        name: str = "",
+        *,
+        page: int = 1,
+        limit: int = 100,
+        order_by: str = "uen",
+        order_direction: str = "asc",
+        responsive_employer: bool = False,
+    ) -> CompanySearchResponse:
+        """Search for companies."""
+        params: dict[str, str | int | bool] = {
+            "name": name,
+            "limit": min(limit, 100),
+            "page": page,
+            "orderBy": order_by,
+            "orderDirection": order_direction,
+            "responsiveEmployer": str(responsive_employer).lower(),
+        }
+        response = self._request("GET", COMPANIES_URL, params=params)
+        return CompanySearchResponse.model_validate(response.json())
