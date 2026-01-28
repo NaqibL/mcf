@@ -1,4 +1,4 @@
-"""Incremental crawl pipeline (DuckDB-backed)."""
+"""Incremental crawl pipeline."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Sequence
 
 from mcf.lib.api.client import MCFClient
 from mcf.lib.crawler.crawler import Crawler
-from mcf.lib.storage.duckdb_store import DuckDBStore, RunStats
+from mcf.lib.storage.base import RunStats, Storage
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,7 @@ def _extract_best_effort_fields(job_detail_json: dict) -> tuple[str | None, str 
 
 def run_incremental_crawl(
     *,
-    db_path: str | Path,
+    store: Storage,
     rate_limit: float = 4.0,
     categories: Sequence[str] | None = None,
     limit: int | None = None,
@@ -53,7 +53,6 @@ def run_incremental_crawl(
     - Diffs against DB to compute added/maintained/removed
     - Fetches job detail only for newly added UUIDs
     """
-    store = DuckDBStore(db_path)
     try:
         run = store.begin_run(kind="incremental", categories=list(categories) if categories else None)
 
@@ -122,5 +121,5 @@ def run_incremental_crawl(
             removed=removed,
         )
     finally:
-        store.close()
+        pass  # Store cleanup handled by caller
 

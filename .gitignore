@@ -30,3 +30,5 @@ wheels/
 
 scratch
 data
+
+.env

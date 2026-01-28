@@ -2,50 +2,90 @@
 
 MyCareersFuture job crawler for Singapore.
 
-## Usage
+## Features
 
-### CLI
+- **Job Scraping**: Incremental crawling of MyCareersFuture job listings
+- **Automatic Scheduling**: Daily crawls via GitHub Actions
+- **Online Database**: PostgreSQL (Neon) for cloud storage
+- **Web Dashboard**: Simple localhost UI for viewing crawl stats and jobs
 
-Crawl all jobs to parquet:
+## Quick Start
+
+**📖 For detailed step-by-step setup instructions, see [SETUP.md](SETUP.md)**
+
+### Quick Summary:
+
+1. **Neon Database**: Create account → Create project → Copy connection string → Run `scripts/schema.sql`
+2. **GitHub Actions**: Add `DATABASE_URL` secret → Test workflow manually → Verify it runs daily
+
+### 3. Local Development
+
+#### Backend API
 
 ```bash
-mcf crawl
+# Install dependencies
+uv sync
+
+# Set environment variables
+export DATABASE_URL=postgresql://user:password@host/database
+
+# Run API server
+uvicorn mcf.api.server:app --reload --port 8000
 ```
 
-Options:
-- `-o, --output` — Output directory (default: `data/jobs`)
-- `-r, --rate-limit` — Requests per second (default: 4.0)
-- `-l, --limit` — Max jobs to fetch (for testing)
+#### Frontend Dashboard
 
-### Library
-
-```python
-from mcf.lib.api.client import MCFClient
-from mcf.lib.crawler.crawler import Crawler
-
-# Direct API access
-with MCFClient() as client:
-    results = client.search_jobs(keywords="python", limit=10)
-    job = client.get_job_detail(results.results[0].uuid)
-
-# Batch crawl
-crawler = Crawler(rate_limit=5.0)
-result = crawler.crawl(categories=["Information Technology"], limit=100)
-df = result.jobs  # pandas DataFrame
+```bash
+cd frontend
+npm install
+npm run dev
 ```
 
----
+Open http://localhost:3000
+
+## Usage
+
+### CLI Commands
+
+**Incremental crawl with PostgreSQL:**
+```bash
+mcf crawl-incremental --db-url "postgresql://user:password@host/database"
+```
+
+**Incremental crawl with DuckDB (legacy):**
+```bash
+mcf crawl-incremental --db data/mcf.duckdb
+```
+
+**Full crawl to parquet (for one-time exports):**
+```bash
+mcf crawl --output data/jobs
+```
+
+### API Endpoints
+
+- `GET /api/jobs` - List jobs with optional filters (`?limit=100&offset=0&keywords=...`)
+- `GET /api/jobs/{job_uuid}` - Get job details by UUID
+- `GET /api/crawl/stats` - Get crawl statistics and recent runs
+- `GET /api/health` - Health check
+
+## Architecture
+
+- **Backend**: FastAPI (Python)
+- **Frontend**: Next.js 14 (React, TypeScript)
+- **Database**: PostgreSQL (Neon) - free tier: 3GB
+- **Scheduling**: GitHub Actions - free tier: 2000 minutes/month
 
 ## Development Guide
 
 ### How to Add New Packages
 
-To add a new production dependency (e.g., 'requests'):
+To add a new production dependency:
 ```bash
 uv add requests
 ```
 
-To add a new development dependency (e.g., 'ipdb'):
+To add a new development dependency:
 ```bash
 uv add --dev ipdb
 ```
@@ -55,23 +95,20 @@ After adding dependencies, always re-generate requirements.txt:
 uv pip compile pyproject.toml -o requirements.txt
 ```
 
-### How to Build Packages
+## Cost
 
-To build your project's distributable packages (.whl, .tar.gz):
-```bash
-python -m build
-```
+- **Neon**: Free tier (3GB database)
+- **GitHub Actions**: Free tier (2000 minutes/month)
+- **Total**: $0/month
 
-Or using the virtual environment directly:
-```bash
-./venv/bin/python -m build
-```
+## Future Enhancements
 
-### Offline Build
+The codebase is designed to be modular. You can easily add:
+- Embeddings and semantic search
+- LLM-powered features
+- Matching algorithms
+- Authentication (if needed)
 
-To build offline packages for deployment:
-```bash
-./dev_scripts/build_offline.sh
-```
+## License
 
-This will create offline_packages/ with all dependencies and install.sh
+MIT

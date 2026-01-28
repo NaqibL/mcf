@@ -10,23 +10,14 @@ from typing import Iterable, Sequence
 
 import duckdb
 
+from mcf.lib.storage.base import RunStats, Storage
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-@dataclass(frozen=True)
-class RunStats:
-    run_id: str
-    started_at: datetime
-    finished_at: datetime | None
-    total_seen: int
-    added: int
-    maintained: int
-    removed: int
-
-
-class DuckDBStore:
+class DuckDBStore(Storage):
     """Persistence layer for incremental crawl state."""
 
     def __init__(self, db_path: str | Path) -> None:
@@ -94,6 +85,73 @@ class DuckDBStore:
             """
         )
         self._con.execute("CREATE INDEX IF NOT EXISTS idx_jobs_active ON jobs(is_active)")
+
+        # User and profile tables
+        self._con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+              user_id TEXT PRIMARY KEY,
+              email TEXT UNIQUE,
+              password_hash TEXT,
+              created_at TIMESTAMP,
+              last_login TIMESTAMP,
+              role TEXT
+            )
+            """
+        )
+        self._con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS candidate_profiles (
+              profile_id TEXT PRIMARY KEY,
+              user_id TEXT,
+              raw_resume_text TEXT,
+              expanded_profile_json TEXT,
+              skills_json TEXT,
+              experience_json TEXT,
+              created_at TIMESTAMP,
+              updated_at TIMESTAMP
+            )
+            """
+        )
+        self._con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS conversations (
+              conversation_id TEXT PRIMARY KEY,
+              profile_id TEXT,
+              messages_json TEXT,
+              created_at TIMESTAMP,
+              updated_at TIMESTAMP
+            )
+            """
+        )
+        self._con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS candidate_embeddings (
+              profile_id TEXT PRIMARY KEY,
+              model_name TEXT,
+              embedding_json TEXT,
+              dim INTEGER,
+              embedded_at TIMESTAMP
+            )
+            """
+        )
+        self._con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS matches (
+              match_id TEXT PRIMARY KEY,
+              profile_id TEXT,
+              job_uuid TEXT,
+              similarity_score FLOAT,
+              match_type TEXT,
+              created_at TIMESTAMP
+            )
+            """
+        )
+        self._con.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+        self._con.execute("CREATE INDEX IF NOT EXISTS idx_profiles_user ON candidate_profiles(user_id)")
+        self._con.execute("CREATE INDEX IF NOT EXISTS idx_conversations_profile ON conversations(profile_id)")
+        self._con.execute("CREATE INDEX IF NOT EXISTS idx_matches_profile ON matches(profile_id)")
+        self._con.execute("CREATE INDEX IF NOT EXISTS idx_matches_job ON matches(job_uuid)")
 
     def begin_run(self, *, kind: str, categories: Sequence[str] | None) -> RunStats:
         started_at = _utcnow()
@@ -257,3 +315,312 @@ class DuckDBStore:
             out.append((uuid, title or "", json.loads(emb_json)))
         return out
 
+    # User management
+    def create_user(self, *, user_id: str, email: str, password_hash: str, role: str = "candidate") -> None:
+        """Create a new user."""
+        now = _utcnow()
+        self._con.execute(
+            """
+            INSERT INTO users(user_id, email, password_hash, created_at, last_login, role)
+            VALUES (?, ?, ?, ?, NULL, ?)
+            """,
+            [user_id, email, password_hash, now, role],
+        )
+
+    def get_user_by_email(self, email: str) -> dict | None:
+        """Get user by email."""
+        row = self._con.execute(
+            "SELECT user_id, email, password_hash, role, created_at, last_login FROM users WHERE email = ?",
+            [email],
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "user_id": row[0],
+            "email": row[1],
+            "password_hash": row[2],
+            "role": row[3],
+            "created_at": row[4],
+            "last_login": row[5],
+        }
+
+    def get_user_by_id(self, user_id: str) -> dict | None:
+        """Get user by ID."""
+        row = self._con.execute(
+            "SELECT user_id, email, password_hash, role, created_at, last_login FROM users WHERE user_id = ?",
+            [user_id],
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "user_id": row[0],
+            "email": row[1],
+            "password_hash": row[2],
+            "role": row[3],
+            "created_at": row[4],
+            "last_login": row[5],
+        }
+
+    def update_last_login(self, user_id: str) -> None:
+        """Update user's last login timestamp."""
+        self._con.execute("UPDATE users SET last_login = ? WHERE user_id = ?", [_utcnow(), user_id])
+
+    # Profile management
+    def create_profile(
+        self,
+        *,
+        profile_id: str,
+        user_id: str,
+        raw_resume_text: str | None = None,
+        expanded_profile_json: dict | None = None,
+        skills_json: list[str] | None = None,
+        experience_json: list[dict] | None = None,
+    ) -> None:
+        """Create a candidate profile."""
+        now = _utcnow()
+        self._con.execute(
+            """
+            INSERT INTO candidate_profiles(profile_id, user_id, raw_resume_text, expanded_profile_json,
+                                          skills_json, experience_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                profile_id,
+                user_id,
+                raw_resume_text,
+                json.dumps(expanded_profile_json) if expanded_profile_json else None,
+                json.dumps(skills_json) if skills_json else None,
+                json.dumps(experience_json) if experience_json else None,
+                now,
+                now,
+            ],
+        )
+
+    def get_profile_by_user_id(self, user_id: str) -> dict | None:
+        """Get profile by user ID."""
+        row = self._con.execute(
+            """
+            SELECT profile_id, user_id, raw_resume_text, expanded_profile_json,
+                   skills_json, experience_json, created_at, updated_at
+            FROM candidate_profiles WHERE user_id = ?
+            """,
+            [user_id],
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "profile_id": row[0],
+            "user_id": row[1],
+            "raw_resume_text": row[2],
+            "expanded_profile_json": json.loads(row[3]) if row[3] else None,
+            "skills_json": json.loads(row[4]) if row[4] else None,
+            "experience_json": json.loads(row[5]) if row[5] else None,
+            "created_at": row[6],
+            "updated_at": row[7],
+        }
+
+    def update_profile(
+        self,
+        *,
+        profile_id: str,
+        raw_resume_text: str | None = None,
+        expanded_profile_json: dict | None = None,
+        skills_json: list[str] | None = None,
+        experience_json: list[dict] | None = None,
+    ) -> None:
+        """Update a candidate profile."""
+        now = _utcnow()
+        updates = []
+        values = []
+        if raw_resume_text is not None:
+            updates.append("raw_resume_text = ?")
+            values.append(raw_resume_text)
+        if expanded_profile_json is not None:
+            updates.append("expanded_profile_json = ?")
+            values.append(json.dumps(expanded_profile_json))
+        if skills_json is not None:
+            updates.append("skills_json = ?")
+            values.append(json.dumps(skills_json))
+        if experience_json is not None:
+            updates.append("experience_json = ?")
+            values.append(json.dumps(experience_json))
+        updates.append("updated_at = ?")
+        values.append(now)
+        values.append(profile_id)
+        self._con.execute(
+            f"UPDATE candidate_profiles SET {', '.join(updates)} WHERE profile_id = ?",
+            values,
+        )
+
+    # Conversation management
+    def create_conversation(self, *, conversation_id: str, profile_id: str, messages: list[dict]) -> None:
+        """Create or update a conversation."""
+        now = _utcnow()
+        self._con.execute(
+            """
+            INSERT INTO conversations(conversation_id, profile_id, messages_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (conversation_id) DO UPDATE SET
+              messages_json = excluded.messages_json,
+              updated_at = excluded.updated_at
+            """,
+            [conversation_id, profile_id, json.dumps(messages), now, now],
+        )
+
+    def get_conversation(self, conversation_id: str) -> dict | None:
+        """Get conversation by ID."""
+        row = self._con.execute(
+            "SELECT conversation_id, profile_id, messages_json, created_at, updated_at FROM conversations WHERE conversation_id = ?",
+            [conversation_id],
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "conversation_id": row[0],
+            "profile_id": row[1],
+            "messages_json": json.loads(row[2]) if row[2] else [],
+            "created_at": row[3],
+            "updated_at": row[4],
+        }
+
+    def get_conversation_by_profile(self, profile_id: str) -> dict | None:
+        """Get conversation by profile ID."""
+        row = self._con.execute(
+            "SELECT conversation_id, profile_id, messages_json, created_at, updated_at FROM conversations WHERE profile_id = ? ORDER BY updated_at DESC LIMIT 1",
+            [profile_id],
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "conversation_id": row[0],
+            "profile_id": row[1],
+            "messages_json": json.loads(row[2]) if row[2] else [],
+            "created_at": row[3],
+            "updated_at": row[4],
+        }
+
+    # Candidate embeddings
+    def upsert_candidate_embedding(self, *, profile_id: str, model_name: str, embedding: Sequence[float]) -> None:
+        """Store candidate embedding."""
+        now = _utcnow()
+        emb_list = [float(x) for x in embedding]
+        self._con.execute(
+            """
+            INSERT INTO candidate_embeddings(profile_id, model_name, embedding_json, dim, embedded_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (profile_id) DO UPDATE SET
+              model_name = excluded.model_name,
+              embedding_json = excluded.embedding_json,
+              dim = excluded.dim,
+              embedded_at = excluded.embedded_at
+            """,
+            [profile_id, model_name, json.dumps(emb_list), len(emb_list), now],
+        )
+
+    def get_candidate_embeddings(self) -> list[tuple[str, list[float]]]:
+        """Get all candidate embeddings."""
+        rows = self._con.execute(
+            "SELECT profile_id, embedding_json FROM candidate_embeddings"
+        ).fetchall()
+        return [(row[0], json.loads(row[1])) for row in rows]
+
+    def get_candidate_embedding(self, profile_id: str) -> list[float] | None:
+        """Get candidate embedding by profile ID."""
+        row = self._con.execute(
+            "SELECT embedding_json FROM candidate_embeddings WHERE profile_id = ?",
+            [profile_id],
+        ).fetchone()
+        if not row:
+            return None
+        return json.loads(row[0])
+
+    # Matching
+    def record_match(
+        self, *, match_id: str, profile_id: str, job_uuid: str, similarity_score: float, match_type: str
+    ) -> None:
+        """Record a match."""
+        now = _utcnow()
+        self._con.execute(
+            """
+            INSERT INTO matches(match_id, profile_id, job_uuid, similarity_score, match_type, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [match_id, profile_id, job_uuid, similarity_score, match_type, now],
+        )
+
+    def get_job(self, job_uuid: str) -> dict | None:
+        """Get job by UUID."""
+        row = self._con.execute(
+            """
+            SELECT job_uuid, title, company_name, location, description, raw_json, is_active
+            FROM jobs WHERE job_uuid = ?
+            """,
+            [job_uuid],
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "job_uuid": row[0],
+            "title": row[1],
+            "company_name": row[2],
+            "location": row[3],
+            "description": row[4],
+            "raw_json": json.loads(row[5]) if row[5] else None,
+            "is_active": row[6],
+        }
+
+    def search_jobs(
+        self, *, limit: int = 100, offset: int = 0, category: str | None = None, keywords: str | None = None
+    ) -> list[dict]:
+        """Search jobs with filters."""
+        sql = "SELECT job_uuid, title, company_name, location, description FROM jobs WHERE is_active = TRUE"
+        params = []
+        if category:
+            sql += " AND raw_json LIKE ?"
+            params.append(f'%"categories"%{category}%')
+        if keywords:
+            sql += " AND (title LIKE ? OR description LIKE ?)"
+            params.extend([f"%{keywords}%", f"%{keywords}%"])
+        sql += " ORDER BY last_seen_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        rows = self._con.execute(sql, params).fetchall()
+        return [
+            {
+                "job_uuid": row[0],
+                "title": row[1],
+                "company_name": row[2],
+                "location": row[3],
+                "description": row[4],
+            }
+            for row in rows
+        ]
+
+    def get_recent_runs(self, limit: int = 10) -> list[dict]:
+        """Get recent crawl runs with statistics."""
+        rows = self._con.execute(
+            """
+            SELECT run_id, started_at, finished_at, total_seen, added, maintained, removed
+            FROM crawl_runs
+            WHERE finished_at IS NOT NULL
+            ORDER BY finished_at DESC
+            LIMIT ?
+            """,
+            [limit],
+        ).fetchall()
+        return [
+            {
+                "run_id": row[0],
+                "started_at": row[1],
+                "finished_at": row[2],
+                "total_seen": row[3],
+                "added": row[4],
+                "maintained": row[5],
+                "removed": row[6],
+            }
+            for row in rows
+        ]
+
+    def get_active_job_count(self) -> int:
+        """Get count of active jobs."""
+        row = self._con.execute("SELECT COUNT(*) FROM jobs WHERE is_active = TRUE").fetchone()
+        return row[0] if row else 0
