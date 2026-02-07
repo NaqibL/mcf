@@ -18,8 +18,8 @@ from rich.progress import (
 )
 
 from mcf.api.services.matching_service import MatchingService
-from mcf.api.services.profile_service import ProfileService
 from mcf.lib.crawler.crawler import CrawlProgress, Crawler
+from mcf.lib.embeddings.embedder import Embedder, EmbedderConfig
 from mcf.lib.embeddings.resume import extract_resume_text
 from mcf.lib.pipeline.incremental_crawl import run_incremental_crawl
 from mcf.lib.storage.base import Storage
@@ -298,11 +298,15 @@ def process_resume(
                 raw_resume_text=resume_text,
             )
         
-        # Generate embedding
+        # Generate embedding directly from resume text
         console.print("[cyan]Generating embedding...[/cyan]")
-        profile_service = ProfileService(store)
-        conversation_id = profile_service.get_or_create_conversation(profile_id)
-        profile_service.finalize_profile(profile_id, conversation_id)
+        embedder = Embedder(EmbedderConfig())
+        embedding = embedder.embed_text(resume_text)
+        store.upsert_candidate_embedding(
+            profile_id=profile_id,
+            model_name=embedder.model_name,
+            embedding=embedding,
+        )
         
         console.print()
         console.print("[bold green]Resume processed successfully![/bold green]")

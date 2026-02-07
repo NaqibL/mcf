@@ -11,7 +11,7 @@ from pathlib import Path
 
 from mcf.api.config import settings
 from mcf.api.services.matching_service import MatchingService
-from mcf.api.services.profile_service import ProfileService
+from mcf.lib.embeddings.embedder import Embedder, EmbedderConfig
 from mcf.lib.embeddings.resume import extract_resume_text
 from mcf.lib.storage.base import Storage
 from mcf.lib.storage.duckdb_store import DuckDBStore
@@ -166,10 +166,14 @@ def process_resume():
                 raw_resume_text=resume_text,
             )
         
-        # Generate embedding
-        from mcf.api.services.profile_service import ProfileService
-        profile_service = ProfileService(store)
-        profile_service.finalize_profile(profile_id, profile_service.get_or_create_conversation(profile_id))
+        # Generate embedding directly from resume text
+        embedder = Embedder(EmbedderConfig())
+        embedding = embedder.embed_text(resume_text)
+        store.upsert_candidate_embedding(
+            profile_id=profile_id,
+            model_name=embedder.model_name,
+            embedding=embedding,
+        )
         
         return {
             "status": "ok",
