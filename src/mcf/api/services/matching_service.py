@@ -149,95 +149,156 @@ class MatchingService:
 
         return results
 
-    def match_job_to_candidates(self, job_uuid: str, top_k: int = 25) -> list[dict[str, Any]]:
-        """Find top matching candidates for a job."""
-        job_embeddings = self.store.get_active_job_embeddings()
-        job_emb = None
-        for uuid, _, emb, _ in job_embeddings:
-            if uuid == job_uuid:
-                job_emb = emb
-                break
+    # ------------------------------------------------------------------
+    # Taste-profile methods
+    # ------------------------------------------------------------------
 
-        if not job_emb:
-            return []
+    def compute_and_store_taste(self, profile_id: str, user_id: str) -> dict:
+        """Build a taste-profile embedding from the user's Interested/Not Interested ratings.
 
-        candidate_embeddings = self.store.get_candidate_embeddings()
-        if not candidate_embeddings:
-            return []
+        Algorithm:
+            positive  = mean embedding of all "interested" jobs
+            negative  = mean embedding of all "not_interested" jobs  (may be empty)
+            taste_raw = positive - 0.3 * negative
+            taste_vec = L2_normalize(taste_raw)
 
-        job_vec = np.array(job_emb, dtype=np.float32)
-        scored: list[tuple[float, str]] = []
+        The result is stored via ``store.upsert_taste_embedding`` and also
+        returned as a dict so the caller can surface stats to the frontend.
 
-        for profile_id, cand_emb in candidate_embeddings:
-            cand_vec = np.array(cand_emb, dtype=np.float32)
-            score = float(np.dot(job_vec, cand_vec))
-            scored.append((score, profile_id))
+        Returns ``{"ok": True, "rated_count": N, "interested": P, "not_interested": Q}``
+        or ``{"ok": False, "reason": "..."}`` if not enough data.
+        """
+        interested_uuids = self.store.get_interested_job_uuids(user_id)
+        not_interested_uuids = self.store.get_not_interested_job_uuids(user_id)
 
-        scored.sort(reverse=True, key=lambda x: x[0])
-        top_matches = scored[:top_k]
+        if not interested_uuids:
+            return {"ok": False, "reason": "No 'interested' ratings yet. Rate at least one job as Interested first."}
 
-        # Get profile details
-        results = []
-        for score, profile_id in top_matches:
-            profile = self.store.get_profile_by_user_id(
-                self.store.get_profile_by_user_id(profile_id)["user_id"] if profile_id else None
-            )
-            if profile:
-                match_id = secrets.token_urlsafe(16)
-                self.store.record_match(
-                    match_id=match_id,
-                    profile_id=profile_id,
-                    job_uuid=job_uuid,
-                    similarity_score=score,
-                    match_type="recruiter_search",
-                )
-                results.append(
-                    {
-                        "profile_id": profile_id,
-                        "skills": profile.get("skills_json", []),
-                        "experience": profile.get("experience_json", []),
-                        "summary": profile.get("expanded_profile_json", {}).get("summary", ""),
-                        "similarity_score": score,
-                    }
-                )
+        pos_pairs = self.store.get_job_embeddings_for_uuids(interested_uuids)
+        if not pos_pairs:
+            return {"ok": False, "reason": "Interested jobs have no embeddings yet."}
 
-        return results
+        pos_matrix = np.array([emb for _, emb in pos_pairs], dtype=np.float32)
+        positive_mean = pos_matrix.mean(axis=0)
 
-    def search_candidates_by_skills(
-        self, skills: list[str], top_k: int = 25
+        taste_raw = positive_mean.copy()
+
+        if not_interested_uuids:
+            neg_pairs = self.store.get_job_embeddings_for_uuids(not_interested_uuids)
+            if neg_pairs:
+                neg_matrix = np.array([emb for _, emb in neg_pairs], dtype=np.float32)
+                negative_mean = neg_matrix.mean(axis=0)
+                taste_raw = taste_raw - 0.3 * negative_mean
+
+        # L2 normalise so dot-product == cosine similarity during matching
+        norm = float(np.linalg.norm(taste_raw))
+        if norm > 0:
+            taste_vec = (taste_raw / norm).tolist()
+        else:
+            taste_vec = positive_mean.tolist()
+
+        # Retrieve model name from an existing job embedding
+        model_name = pos_pairs[0][0] if pos_pairs else "BAAI/bge-small-en-v1.5"
+        # Get the actual model name from job_embeddings
+        row = self.store._con.execute(
+            "SELECT model_name FROM job_embeddings LIMIT 1"
+        ).fetchone()
+        if row:
+            model_name = row[0]
+
+        self.store.upsert_taste_embedding(
+            profile_id=profile_id,
+            model_name=model_name,
+            embedding=taste_vec,
+        )
+
+        return {
+            "ok": True,
+            "interested": len(pos_pairs),
+            "not_interested": len(not_interested_uuids),
+            "rated_count": len(interested_uuids) + len(not_interested_uuids),
+        }
+
+    def match_taste_to_jobs(
+        self,
+        profile_id: str,
+        top_k: int = 25,
+        exclude_rated: bool = True,
+        user_id: str | None = None,
+        min_similarity: float = 0.0,
+        max_days_old: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Search candidates by skills (keyword + semantic matching)."""
-        # Get all candidate embeddings
-        candidate_embeddings = self.store.get_candidate_embeddings()
-        if not candidate_embeddings:
+        """Find top jobs matching the user's taste-profile embedding.
+
+        Pure semantic matching — no skills overlap (taste already encodes
+        the user's demonstrated preferences directly).
+        """
+        taste_emb = self.store.get_taste_embedding(profile_id)
+        if not taste_emb:
             return []
 
-        # Simple keyword matching for now (can be enhanced with embeddings)
-        results = []
-        skills_lower = [s.lower() for s in skills]
+        job_embeddings = self.store.get_active_job_embeddings()
+        if not job_embeddings:
+            return []
 
-        for profile_id, _ in candidate_embeddings:
-            profile = self.store.get_profile_by_profile_id(profile_id)
-            if not profile:
+        # Exclude already-rated (interested / not_interested) jobs
+        rated_uuids: set[str] = set()
+        if exclude_rated and user_id:
+            rated_uuids = set(self.store.get_interested_job_uuids(user_id)) | set(
+                self.store.get_not_interested_job_uuids(user_id)
+            )
+
+        taste_vec = np.array(taste_emb, dtype=np.float32)
+        scored: list[tuple[float, str, str, datetime | None, dict]] = []
+
+        for job_uuid, title, job_emb, job_details in job_embeddings:
+            if exclude_rated and job_uuid in rated_uuids:
                 continue
 
-            profile_skills = profile.get("skills_json", [])
-            profile_skills_lower = [s.lower() for s in profile_skills]
+            job_vec = np.array(job_emb, dtype=np.float32)
+            score = float(np.dot(taste_vec, job_vec))
 
-            # Count matching skills
-            matches = sum(1 for skill in skills_lower if any(skill in ps for ps in profile_skills_lower))
-            if matches > 0:
-                score = matches / len(skills) if skills else 0
-                results.append(
-                    {
-                        "profile_id": profile_id,
-                        "skills": profile_skills,
-                        "experience": profile.get("experience_json", []),
-                        "summary": profile.get("expanded_profile_json", {}).get("summary", ""),
-                        "match_score": score,
-                        "matched_skills": matches,
-                    }
-                )
+            if score < min_similarity:
+                continue
 
-        results.sort(reverse=True, key=lambda x: x["match_score"])
-        return results[:top_k]
+            last_seen_at = job_details.get("last_seen_at")
+            if max_days_old is not None and last_seen_at:
+                if last_seen_at.tzinfo is None:
+                    last_seen_at = last_seen_at.replace(tzinfo=timezone.utc)
+                if (datetime.now(timezone.utc) - last_seen_at).days > max_days_old:
+                    continue
+
+            scored.append((score, job_uuid, title, last_seen_at, job_details))
+
+        def sort_key(x: tuple) -> tuple:
+            score, _, _, last_seen, _ = x
+            date_for_sort = last_seen if last_seen else datetime(1970, 1, 1, tzinfo=timezone.utc)
+            return (score, date_for_sort)
+
+        scored.sort(reverse=True, key=sort_key)
+        top_matches = scored[:top_k]
+
+        results = []
+        for score, job_uuid, title, _, job_details in top_matches:
+            match_id = secrets.token_urlsafe(16)
+            self.store.record_match(
+                match_id=match_id,
+                profile_id=profile_id,
+                job_uuid=job_uuid,
+                similarity_score=score,
+                match_type="taste",
+            )
+            results.append(
+                {
+                    "job_uuid": job_uuid,
+                    "title": title,
+                    "company_name": job_details.get("company_name"),
+                    "location": job_details.get("location"),
+                    "job_url": job_details.get("job_url"),
+                    "similarity_score": score,
+                    "job_skills": job_details.get("skills") or [],
+                    "last_seen_at": job_details.get("last_seen_at"),
+                }
+            )
+
+        return results

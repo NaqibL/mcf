@@ -1,7 +1,5 @@
 """Job categories used by MyCareersFuture."""
 
-from urllib.parse import quote
-
 CATEGORIES: list[str] = [
     "Accounting / Auditing / Taxation",
     "Admin / Secretarial",

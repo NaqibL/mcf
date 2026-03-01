@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
 
-from mcf.lib.api.client import MCFClient
-from mcf.lib.crawler.crawler import Crawler
+from mcf.lib.embeddings.base import EmbedderProtocol
 from mcf.lib.embeddings.embedder import Embedder, EmbedderConfig
-from mcf.lib.embeddings.job_text import build_job_text, extract_job_skills
+from mcf.lib.embeddings.job_text import build_job_text_from_normalized
+from mcf.lib.sources.base import NormalizedJob
+from mcf.lib.sources.mcf_source import MCFJobSource
 from mcf.lib.storage.base import RunStats, Storage
+
+if TYPE_CHECKING:
+    from mcf.lib.sources.base import JobSource
 
 
 @dataclass(frozen=True)
@@ -22,37 +25,11 @@ class IncrementalCrawlResult:
     removed: list[str]
 
 
-def _extract_best_effort_fields(job_detail_json: dict) -> tuple[str | None, str | None, str | None, str | None, str | None]:
-    # The API model can evolve; keep extraction defensive.
-    title = job_detail_json.get("title") or job_detail_json.get("jobTitle")
-    description = job_detail_json.get("description") or job_detail_json.get("jobDescription")
-
-    company_name = None
-    company = job_detail_json.get("company") or job_detail_json.get("postingCompany")
-    if isinstance(company, dict):
-        company_name = company.get("name") or company.get("companyName")
-
-    location = None
-    addr = job_detail_json.get("address") or job_detail_json.get("workLocation")
-    if isinstance(addr, dict):
-        # pick something readable
-        location = addr.get("country") or addr.get("postalCode") or addr.get("streetAddress")
-
-    # Extract job URL from metadata
-    job_url = None
-    metadata = job_detail_json.get("metadata")
-    if isinstance(metadata, dict):
-        job_url = metadata.get("jobDetailsUrl")
-    # Also check top-level
-    if not job_url:
-        job_url = job_detail_json.get("jobDetailsUrl")
-
-    return title, company_name, location, description, job_url
-
-
 def run_incremental_crawl(
     *,
     store: Storage,
+    source: JobSource | None = None,
+    embedder: EmbedderProtocol | None = None,
     rate_limit: float = 4.0,
     categories: Sequence[str] | None = None,
     limit: int | None = None,
@@ -60,15 +37,16 @@ def run_incremental_crawl(
 ) -> IncrementalCrawlResult:
     """Run an incremental crawl.
 
-    - Lists UUIDs (cheap)
+    - Lists job IDs from the source (cheap)
     - Diffs against DB to compute added/maintained/removed
-    - Fetches job detail only for newly added UUIDs
+    - Fetches job detail only for newly added jobs
     """
+    job_source = source or MCFJobSource(rate_limit=rate_limit)
+
     try:
         run = store.begin_run(kind="incremental", categories=list(categories) if categories else None)
 
-        crawler = Crawler(rate_limit=rate_limit)
-        seen = crawler.list_job_uuids_all_categories(
+        seen = job_source.list_job_ids(
             categories=list(categories) if categories else None,
             limit=limit,
             on_progress=on_progress,
@@ -79,61 +57,54 @@ def run_incremental_crawl(
 
         added = sorted(seen_set - existing)
         maintained = sorted(seen_set & existing)
-        # Only a *full crawl* can reliably infer removals.
-        # If user filters by categories or uses a limit, we must not deactivate
-        # the rest of the universe (they simply weren't checked).
+        # Only a *full crawl* can reliably infer removals. For multi-source, only
+        # remove jobs from this source that are no longer listed.
         is_full_universe = (categories is None) and (limit is None)
-        removed = sorted(active - seen_set) if is_full_universe else []
+        if is_full_universe and hasattr(store, "active_job_uuids_for_source"):
+            active_for_source = store.active_job_uuids_for_source(job_source.source_id)
+            removed = sorted(active_for_source - seen_set)
+        else:
+            removed = sorted(active - seen_set) if is_full_universe else []
 
-        # Update statuses in DB first, then fetch details for added.
         store.record_statuses(run.run_id, added=added, maintained=maintained, removed=removed)
         store.touch_jobs(run_id=run.run_id, job_uuids=maintained)
         if removed:
             store.deactivate_jobs(run_id=run.run_id, job_uuids=removed)
 
         if added:
-            # Initialize embedder for generating embeddings
-            embedder = Embedder(EmbedderConfig())
+            _embedder: EmbedderProtocol = embedder if embedder is not None else Embedder(EmbedderConfig())
 
-            with MCFClient(rate_limit=rate_limit) as client:
-                for uuid in added:
-                    detail = client.get_job_detail(uuid)
-                    raw = detail.model_dump(by_alias=True, mode="json")
-                    title, company_name, location, _description, job_url = _extract_best_effort_fields(raw)
+            for external_id in added:
+                normalized = job_source.get_job_detail(external_id)
+                job_uuid = normalized.job_uuid
 
-                    # Build structured job text and extract skills from the API response.
-                    # This is richer than embedding raw description text:
-                    #   title + seniority level + skills list + first ~100-word snippet
-                    job_text = build_job_text(raw)
-                    skills = extract_job_skills(raw)
+                job_text = build_job_text_from_normalized(normalized)
 
-                    # Generate embedding from structured job text
-                    embedding = None
-                    if job_text:
-                        try:
-                            embedding = embedder.embed_text(job_text)
-                        except Exception as e:
-                            print(f"Warning: Failed to generate embedding for job {uuid}: {e}")
+                embedding = None
+                if job_text:
+                    try:
+                        embedding = _embedder.embed_text(job_text)
+                    except Exception as e:
+                        print(f"Warning: Failed to generate embedding for job {job_uuid}: {e}")
 
-                    # Store job details (without raw description text to save space)
-                    store.upsert_new_job_detail(
-                        run_id=run.run_id,
-                        job_uuid=uuid,
-                        title=title,
-                        company_name=company_name,
-                        location=location,
-                        job_url=job_url,
-                        skills=skills or None,
-                        raw_json=None,
+                store.upsert_new_job_detail(
+                    run_id=run.run_id,
+                    job_uuid=job_uuid,
+                    title=normalized.title,
+                    company_name=normalized.company_name,
+                    location=normalized.location,
+                    job_url=normalized.job_url,
+                    job_source=normalized.source_id,
+                    skills=normalized.skills or None,
+                    raw_json=None,
+                )
+
+                if embedding:
+                    store.upsert_embedding(
+                        job_uuid=job_uuid,
+                        model_name=_embedder.model_name,
+                        embedding=embedding,
                     )
-
-                    # Store embedding if generated
-                    if embedding:
-                        store.upsert_embedding(
-                            job_uuid=uuid,
-                            model_name=embedder.model_name,
-                            embedding=embedding,
-                        )
 
         store.finish_run(
             run.run_id,

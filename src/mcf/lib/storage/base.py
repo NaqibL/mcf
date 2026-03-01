@@ -73,6 +73,7 @@ class Storage(ABC):
         company_name: str | None,
         location: str | None,
         job_url: str | None,
+        job_source: str = "mcf",
         raw_json: dict | None = None,
     ) -> None:
         """Insert or update a job detail."""

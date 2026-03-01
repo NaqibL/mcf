@@ -5,8 +5,8 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'MCF Job Crawler',
-  description: 'MyCareersFuture job crawler dashboard',
+  title: 'Job Matcher',
+  description: 'Job matching dashboard',
 }
 
 export default function RootLayout({

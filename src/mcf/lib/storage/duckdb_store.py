@@ -50,6 +50,7 @@ class DuckDBStore(Storage):
             """
             CREATE TABLE IF NOT EXISTS jobs (
               job_uuid TEXT PRIMARY KEY,
+              job_source TEXT DEFAULT 'mcf',
               first_seen_run_id TEXT,
               last_seen_run_id TEXT,
               is_active BOOLEAN,
@@ -105,11 +106,32 @@ class DuckDBStore(Storage):
         for _col_ddl in [
             "ALTER TABLE jobs ADD COLUMN job_url TEXT",
             "ALTER TABLE jobs ADD COLUMN skills_json TEXT",
+            "ALTER TABLE jobs ADD COLUMN job_source TEXT DEFAULT 'mcf'",
+            # candidate_embeddings: support multiple embedding types per profile
+            # (taste embedding stored with profile_id suffix ':taste')
+            "ALTER TABLE candidate_embeddings ADD COLUMN embedding_type TEXT DEFAULT 'resume'",
         ]:
             try:
                 self._con.execute(_col_ddl)
             except duckdb.ProgrammingError:
                 pass  # column already exists
+
+        # Backfill job_url for MCF rows that have NULL (jobs crawled before URL extraction).
+        # Only apply MCF URL pattern when job_source is NULL or 'mcf'.
+        self._con.execute(
+            """
+            UPDATE jobs
+               SET job_url = 'https://www.mycareersfuture.gov.sg/job/' || job_uuid
+             WHERE job_url IS NULL
+               AND (job_source IS NULL OR job_source = 'mcf')
+            """
+        )
+        # Backfill job_source for existing rows
+        self._con.execute(
+            """
+            UPDATE jobs SET job_source = 'mcf' WHERE job_source IS NULL
+            """
+        )
 
         # User and profile tables
         self._con.execute(
@@ -140,17 +162,6 @@ class DuckDBStore(Storage):
         )
         self._con.execute(
             """
-            CREATE TABLE IF NOT EXISTS conversations (
-              conversation_id TEXT PRIMARY KEY,
-              profile_id TEXT,
-              messages_json TEXT,
-              created_at TIMESTAMP,
-              updated_at TIMESTAMP
-            )
-            """
-        )
-        self._con.execute(
-            """
             CREATE TABLE IF NOT EXISTS candidate_embeddings (
               profile_id TEXT PRIMARY KEY,
               model_name TEXT,
@@ -174,7 +185,6 @@ class DuckDBStore(Storage):
         )
         self._con.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
         self._con.execute("CREATE INDEX IF NOT EXISTS idx_profiles_user ON candidate_profiles(user_id)")
-        self._con.execute("CREATE INDEX IF NOT EXISTS idx_conversations_profile ON conversations(profile_id)")
         self._con.execute("CREATE INDEX IF NOT EXISTS idx_matches_profile ON matches(profile_id)")
         self._con.execute("CREATE INDEX IF NOT EXISTS idx_matches_job ON matches(job_uuid)")
 
@@ -221,6 +231,19 @@ class DuckDBStore(Storage):
         rows = self._con.execute("SELECT job_uuid FROM jobs WHERE is_active = TRUE").fetchall()
         return {r[0] for r in rows}
 
+    def active_job_uuids_for_source(self, job_source: str) -> set[str]:
+        """Get active job UUIDs for a specific source (for multi-source removal logic)."""
+        if job_source == "mcf":
+            rows = self._con.execute(
+                "SELECT job_uuid FROM jobs WHERE is_active = TRUE AND (job_source = 'mcf' OR job_source IS NULL)"
+            ).fetchall()
+        else:
+            rows = self._con.execute(
+                "SELECT job_uuid FROM jobs WHERE is_active = TRUE AND job_source = ?",
+                [job_source],
+            ).fetchall()
+        return {r[0] for r in rows}
+
     def record_statuses(self, run_id: str, *, added: Iterable[str], maintained: Iterable[str], removed: Iterable[str]) -> None:
         # Batch insert for speed
         rows: list[tuple[str, str, str]] = []
@@ -243,6 +266,7 @@ class DuckDBStore(Storage):
         company_name: str | None,
         location: str | None,
         job_url: str | None,
+        job_source: str = "mcf",
         skills: list[str] | None = None,
         raw_json: dict | None = None,
     ) -> None:
@@ -250,11 +274,12 @@ class DuckDBStore(Storage):
         skills_json_str = json.dumps(skills) if skills else None
         self._con.execute(
             """
-            INSERT INTO jobs(job_uuid, first_seen_run_id, last_seen_run_id, is_active,
+            INSERT INTO jobs(job_uuid, job_source, first_seen_run_id, last_seen_run_id, is_active,
                              first_seen_at, last_seen_at,
                              title, company_name, location, job_url, skills_json)
-            VALUES (?, ?, ?, TRUE, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, TRUE, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (job_uuid) DO UPDATE SET
+              job_source = COALESCE(excluded.job_source, jobs.job_source),
               last_seen_run_id = excluded.last_seen_run_id,
               is_active = TRUE,
               last_seen_at = excluded.last_seen_at,
@@ -266,6 +291,7 @@ class DuckDBStore(Storage):
             """,
             [
                 job_uuid,
+                job_source,
                 run_id,
                 run_id,
                 now,
@@ -513,53 +539,6 @@ class DuckDBStore(Storage):
             values,
         )
 
-    # Conversation management
-    def create_conversation(self, *, conversation_id: str, profile_id: str, messages: list[dict]) -> None:
-        """Create or update a conversation."""
-        now = _utcnow()
-        self._con.execute(
-            """
-            INSERT INTO conversations(conversation_id, profile_id, messages_json, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT (conversation_id) DO UPDATE SET
-              messages_json = excluded.messages_json,
-              updated_at = excluded.updated_at
-            """,
-            [conversation_id, profile_id, json.dumps(messages), now, now],
-        )
-
-    def get_conversation(self, conversation_id: str) -> dict | None:
-        """Get conversation by ID."""
-        row = self._con.execute(
-            "SELECT conversation_id, profile_id, messages_json, created_at, updated_at FROM conversations WHERE conversation_id = ?",
-            [conversation_id],
-        ).fetchone()
-        if not row:
-            return None
-        return {
-            "conversation_id": row[0],
-            "profile_id": row[1],
-            "messages_json": json.loads(row[2]) if row[2] else [],
-            "created_at": row[3],
-            "updated_at": row[4],
-        }
-
-    def get_conversation_by_profile(self, profile_id: str) -> dict | None:
-        """Get conversation by profile ID."""
-        row = self._con.execute(
-            "SELECT conversation_id, profile_id, messages_json, created_at, updated_at FROM conversations WHERE profile_id = ? ORDER BY updated_at DESC LIMIT 1",
-            [profile_id],
-        ).fetchone()
-        if not row:
-            return None
-        return {
-            "conversation_id": row[0],
-            "profile_id": row[1],
-            "messages_json": json.loads(row[2]) if row[2] else [],
-            "created_at": row[3],
-            "updated_at": row[4],
-        }
-
     # Candidate embeddings
     def upsert_candidate_embedding(self, *, profile_id: str, model_name: str, embedding: Sequence[float]) -> None:
         """Store candidate embedding."""
@@ -711,6 +690,147 @@ class DuckDBStore(Storage):
             [user_id, job_uuid],
         ).fetchone()
         return row is not None
+
+    # Discover / taste-profile helpers
+
+    def get_interested_job_uuids(self, user_id: str) -> list[str]:
+        """Return job UUIDs the user has marked as 'interested'."""
+        rows = self._con.execute(
+            "SELECT job_uuid FROM job_interactions WHERE user_id = ? AND interaction_type = 'interested'",
+            [user_id],
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def get_not_interested_job_uuids(self, user_id: str) -> list[str]:
+        """Return job UUIDs the user has marked as 'not_interested'."""
+        rows = self._con.execute(
+            "SELECT job_uuid FROM job_interactions WHERE user_id = ? AND interaction_type = 'not_interested'",
+            [user_id],
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def get_discover_jobs(self, user_id: str, limit: int = 20) -> list[dict]:
+        """Return active jobs with embeddings that the user has NOT yet rated
+        (no 'interested' or 'not_interested' interaction).
+
+        Sorted by recency so the freshest jobs surface first.
+        """
+        rows = self._con.execute(
+            """
+            SELECT j.job_uuid, j.title, j.company_name, j.location, j.job_url,
+                   j.last_seen_at, j.skills_json
+              FROM jobs j
+              JOIN job_embeddings e ON e.job_uuid = j.job_uuid
+             WHERE j.is_active = TRUE
+               AND NOT EXISTS (
+                     SELECT 1 FROM job_interactions i
+                      WHERE i.user_id = ?
+                        AND i.job_uuid = j.job_uuid
+                        AND i.interaction_type IN ('interested', 'not_interested')
+                   )
+             ORDER BY j.last_seen_at DESC
+             LIMIT ?
+            """,
+            [user_id, limit],
+        ).fetchall()
+        return [
+            {
+                "job_uuid": row[0],
+                "title": row[1],
+                "company_name": row[2],
+                "location": row[3],
+                "job_url": row[4],
+                "last_seen_at": row[5],
+                "skills": json.loads(row[6]) if row[6] else [],
+            }
+            for row in rows
+        ]
+
+    def get_discover_stats(self, user_id: str) -> dict:
+        """Return counts of interested, not_interested, and unrated jobs."""
+        row = self._con.execute(
+            """
+            SELECT
+              COUNT(*) FILTER (WHERE interaction_type = 'interested')       AS interested,
+              COUNT(*) FILTER (WHERE interaction_type = 'not_interested')   AS not_interested
+            FROM job_interactions
+            WHERE user_id = ?
+            """,
+            [user_id],
+        ).fetchone()
+        interested = row[0] if row else 0
+        not_interested = row[1] if row else 0
+
+        unrated_row = self._con.execute(
+            """
+            SELECT COUNT(*)
+              FROM jobs j
+              JOIN job_embeddings e ON e.job_uuid = j.job_uuid
+             WHERE j.is_active = TRUE
+               AND NOT EXISTS (
+                     SELECT 1 FROM job_interactions i
+                      WHERE i.user_id = ?
+                        AND i.job_uuid = j.job_uuid
+                        AND i.interaction_type IN ('interested', 'not_interested')
+                   )
+            """,
+            [user_id],
+        ).fetchone()
+        unrated = unrated_row[0] if unrated_row else 0
+
+        return {
+            "interested": interested,
+            "not_interested": not_interested,
+            "unrated": unrated,
+            "total_rated": interested + not_interested,
+        }
+
+    def upsert_taste_embedding(self, *, profile_id: str, model_name: str, embedding: Sequence[float]) -> None:
+        """Store a taste-profile embedding.
+
+        Uses the key ``{profile_id}:taste`` in candidate_embeddings so it can
+        coexist with the resume embedding without a schema change.
+        """
+        taste_key = f"{profile_id}:taste"
+        now = _utcnow()
+        emb_list = [float(x) for x in embedding]
+        self._con.execute(
+            """
+            INSERT INTO candidate_embeddings(profile_id, model_name, embedding_json, dim, embedded_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (profile_id) DO UPDATE SET
+              model_name = excluded.model_name,
+              embedding_json = excluded.embedding_json,
+              dim = excluded.dim,
+              embedded_at = excluded.embedded_at
+            """,
+            [taste_key, model_name, json.dumps(emb_list), len(emb_list), now],
+        )
+
+    def get_taste_embedding(self, profile_id: str) -> list[float] | None:
+        """Get taste-profile embedding, or None if not yet computed."""
+        taste_key = f"{profile_id}:taste"
+        row = self._con.execute(
+            "SELECT embedding_json FROM candidate_embeddings WHERE profile_id = ?",
+            [taste_key],
+        ).fetchone()
+        if not row:
+            return None
+        return json.loads(row[0])
+
+    def get_job_embeddings_for_uuids(self, uuids: list[str]) -> list[tuple[str, list[float]]]:
+        """Return (job_uuid, embedding) pairs for the given UUID list.
+
+        Skips UUIDs that have no embedding stored.
+        """
+        if not uuids:
+            return []
+        placeholders = ", ".join("?" for _ in uuids)
+        rows = self._con.execute(
+            f"SELECT job_uuid, embedding_json FROM job_embeddings WHERE job_uuid IN ({placeholders})",
+            uuids,
+        ).fetchall()
+        return [(row[0], json.loads(row[1])) for row in rows]
 
     def get_profile_by_profile_id(self, profile_id: str) -> dict | None:
         """Get profile by profile ID."""

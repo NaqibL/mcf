@@ -1,7 +1,4 @@
-"""
-Models strictly following the MCF API JSON structure.
-Designed for JSON serialization and pandas/polars/pyarrow compatibility.
-"""
+"""Models strictly following the MCF API JSON structure."""
 
 from pydantic import BaseModel, ConfigDict
 
@@ -163,60 +160,3 @@ class SearchResponse(_Base):
     countWithoutFilters: int
 
 
-# ==============================================================================
-# Profile/Common Data Models
-# ==============================================================================
-
-
-class EmploymentTypeOption(_Base):
-    id: str
-    name: str
-
-
-class Ssoc(_Base):
-    ssocTitle: str
-    ssoc: str
-
-
-class Ssic(_Base):
-    code: str
-    description: str
-
-
-class Country(_Base):
-    code: str
-    description: str
-    codeNumber: str
-
-
-class EmploymentStatus(_Base):
-    id: str
-    description: str
-
-
-class SsecEqa(_Base):
-    code: str
-    description: str
-
-
-class SsecFos(_Base):
-    code: str
-    description: str
-
-
-class CommonData(_Base):
-    employmentTypes: list[EmploymentTypeOption] = []
-    ssocList: list[Ssoc] = []
-    ssicList: list[Ssic] = []
-    countriesList: list[Country] = []
-    employmentStatusList: list[EmploymentStatus] = []
-    ssecEqaList: list[SsecEqa] = []
-    ssecFosList: list[SsecFos] = []
-
-
-class ProfileData(_Base):
-    common: CommonData | None = None
-
-
-class ProfileResponse(_Base):
-    data: ProfileData | None = None

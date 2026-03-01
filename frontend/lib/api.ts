@@ -1,61 +1,20 @@
 import axios from 'axios'
+import type { Profile, Match, Job, DiscoverStats, MatchMode } from './types'
+
+export type { Profile, Match, Job, DiscoverStats, MatchMode }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  headers: { 'Content-Type': 'application/json' },
 })
-
-export interface Job {
-  job_uuid: string
-  title: string
-  company_name: string | null
-  location: string | null
-  job_url: string | null
-  similarity_score?: number
-  last_seen_at?: string
-  interactions?: string[]
-}
-
-export interface Match {
-  job_uuid: string
-  title: string
-  company_name: string | null
-  location: string | null
-  job_url: string | null
-  similarity_score: number
-  last_seen_at?: string
-}
-
-export interface Profile {
-  user_id: string
-  profile: any
-  resume_path: string
-  resume_exists: boolean
-}
 
 // Jobs API
 export const jobsApi = {
-  list: async (limit: number = 100, offset: number = 0, keywords?: string, excludeInteracted: boolean = true) => {
-    const params = new URLSearchParams({ 
-      limit: limit.toString(), 
-      offset: offset.toString(),
-      exclude_interacted: excludeInteracted.toString()
-    })
-    if (keywords) params.append('keywords', keywords)
-    const response = await api.get(`/api/jobs?${params}`)
-    return response.data
-  },
-  get: async (jobUuid: string) => {
-    const response = await api.get(`/api/jobs/${jobUuid}`)
-    return response.data
-  },
   markInteraction: async (jobUuid: string, interactionType: string) => {
     const response = await api.post(`/api/jobs/${jobUuid}/interact`, null, {
-      params: { interaction_type: interactionType }
+      params: { interaction_type: interactionType },
     })
     return response.data
   },
@@ -67,31 +26,43 @@ export const profileApi = {
     const response = await api.get('/api/profile')
     return response.data as Profile
   },
+
   processResume: async () => {
     const response = await api.post('/api/profile/process-resume')
     return response.data
+  },
+
+  computeTaste: async () => {
+    const response = await api.post('/api/profile/compute-taste')
+    return response.data as { ok: boolean; interested: number; not_interested: number; rated_count: number }
   },
 }
 
 // Matches API
 export const matchesApi = {
   get: async (
-    excludeInteracted: boolean = true, 
-    topK: number = 25,
+    mode: MatchMode = 'resume',
+    excludeInteracted = true,
+    topK = 25,
     minSimilarity?: number,
-    maxDaysOld?: number
+    maxDaysOld?: number,
   ) => {
     const params = new URLSearchParams({
+      mode,
       exclude_interacted: excludeInteracted.toString(),
-      top_k: topK.toString()
+      top_k: topK.toString(),
     })
-    if (minSimilarity !== undefined) {
-      params.append('min_similarity', minSimilarity.toString())
-    }
-    if (maxDaysOld !== undefined) {
-      params.append('max_days_old', maxDaysOld.toString())
-    }
+    if (minSimilarity !== undefined) params.append('min_similarity', minSimilarity.toString())
+    if (maxDaysOld !== undefined) params.append('max_days_old', maxDaysOld.toString())
     const response = await api.get(`/api/matches?${params}`)
-    return response.data
+    return response.data as { matches: Match[]; total: number; mode: MatchMode }
+  },
+}
+
+// Discover API
+export const discoverApi = {
+  getStats: async () => {
+    const response = await api.get('/api/discover/stats')
+    return response.data as DiscoverStats
   },
 }
