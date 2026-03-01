@@ -58,7 +58,8 @@ class DuckDBStore(Storage):
               title TEXT,
               company_name TEXT,
               location TEXT,
-              job_url TEXT
+              job_url TEXT,
+              skills_json TEXT
             )
             """
         )
@@ -99,6 +100,16 @@ class DuckDBStore(Storage):
             """
         )
         self._con.execute("CREATE INDEX IF NOT EXISTS idx_job_interactions_user_job ON job_interactions(user_id, job_uuid)")
+        
+        # Migrations: add columns introduced after initial schema (safe to re-run)
+        for _col_ddl in [
+            "ALTER TABLE jobs ADD COLUMN job_url TEXT",
+            "ALTER TABLE jobs ADD COLUMN skills_json TEXT",
+        ]:
+            try:
+                self._con.execute(_col_ddl)
+            except duckdb.ProgrammingError:
+                pass  # column already exists
 
         # User and profile tables
         self._con.execute(
@@ -232,15 +243,17 @@ class DuckDBStore(Storage):
         company_name: str | None,
         location: str | None,
         job_url: str | None,
+        skills: list[str] | None = None,
         raw_json: dict | None = None,
     ) -> None:
         now = _utcnow()
+        skills_json_str = json.dumps(skills) if skills else None
         self._con.execute(
             """
             INSERT INTO jobs(job_uuid, first_seen_run_id, last_seen_run_id, is_active,
                              first_seen_at, last_seen_at,
-                             title, company_name, location, job_url)
-            VALUES (?, ?, ?, TRUE, ?, ?, ?, ?, ?, ?)
+                             title, company_name, location, job_url, skills_json)
+            VALUES (?, ?, ?, TRUE, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (job_uuid) DO UPDATE SET
               last_seen_run_id = excluded.last_seen_run_id,
               is_active = TRUE,
@@ -248,7 +261,8 @@ class DuckDBStore(Storage):
               title = COALESCE(excluded.title, jobs.title),
               company_name = COALESCE(excluded.company_name, jobs.company_name),
               location = COALESCE(excluded.location, jobs.location),
-              job_url = COALESCE(excluded.job_url, jobs.job_url)
+              job_url = COALESCE(excluded.job_url, jobs.job_url),
+              skills_json = COALESCE(excluded.skills_json, jobs.skills_json)
             """,
             [
                 job_uuid,
@@ -260,6 +274,7 @@ class DuckDBStore(Storage):
                 company_name,
                 location,
                 job_url,
+                skills_json_str,
             ],
         )
 
@@ -315,33 +330,51 @@ class DuckDBStore(Storage):
 
     def get_active_job_embeddings(self) -> list[tuple[str, str, list[float], dict]]:
         """Get active job embeddings with all job details in a single query.
-        
+
         Returns:
             List of tuples: (job_uuid, title, embedding, job_details_dict)
-            where job_details_dict contains: company_name, location, job_url, 
-            first_seen_at, last_seen_at
+            where job_details_dict contains: company_name, location, job_url,
+            first_seen_at, last_seen_at, skills (list[str])
         """
         rows = self._con.execute(
             """
             SELECT j.job_uuid, j.title, e.embedding_json,
                    j.company_name, j.location, j.job_url,
-                   j.first_seen_at, j.last_seen_at
+                   j.first_seen_at, j.last_seen_at, j.skills_json
               FROM jobs j
               JOIN job_embeddings e ON e.job_uuid = j.job_uuid
              WHERE j.is_active = TRUE
             """
         ).fetchall()
         out: list[tuple[str, str, list[float], dict]] = []
-        for uuid, title, emb_json, company_name, location, job_url, first_seen_at, last_seen_at in rows:
+        for uuid, title, emb_json, company_name, location, job_url, first_seen_at, last_seen_at, skills_json in rows:
             job_details = {
                 "company_name": company_name,
                 "location": location,
                 "job_url": job_url,
                 "first_seen_at": first_seen_at,
                 "last_seen_at": last_seen_at,
+                "skills": json.loads(skills_json) if skills_json else [],
             }
             out.append((uuid, title or "", json.loads(emb_json), job_details))
         return out
+
+    def get_all_active_jobs(self) -> list[dict]:
+        """Get all active jobs with stored metadata (for re-embedding).
+
+        Returns a list of dicts with: job_uuid, title, skills (list[str]).
+        """
+        rows = self._con.execute(
+            "SELECT job_uuid, title, skills_json FROM jobs WHERE is_active = TRUE"
+        ).fetchall()
+        result = []
+        for uuid, title, skills_json in rows:
+            result.append({
+                "job_uuid": uuid,
+                "title": title or "",
+                "skills": json.loads(skills_json) if skills_json else [],
+            })
+        return result
 
     # User management
     def create_user(self, *, user_id: str, email: str, password_hash: str, role: str = "candidate") -> None:

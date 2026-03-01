@@ -20,6 +20,7 @@ from rich.progress import (
 from mcf.api.services.matching_service import MatchingService
 from mcf.lib.crawler.crawler import CrawlProgress, Crawler
 from mcf.lib.embeddings.embedder import Embedder, EmbedderConfig
+from mcf.lib.embeddings.job_text import build_job_text
 from mcf.lib.embeddings.resume import extract_resume_text
 from mcf.lib.pipeline.incremental_crawl import run_incremental_crawl
 from mcf.lib.storage.base import Storage
@@ -298,10 +299,12 @@ def process_resume(
                 raw_resume_text=resume_text,
             )
         
-        # Generate embedding directly from resume text
+        # Generate embedding for the resume using the query-side method.
+        # BGE models expect a task prefix on the query (resume) side so that
+        # the embedding space aligns correctly with passage (job) embeddings.
         console.print("[cyan]Generating embedding...[/cyan]")
         embedder = Embedder(EmbedderConfig())
-        embedding = embedder.embed_text(resume_text)
+        embedding = embedder.embed_query(resume_text)
         store.upsert_candidate_embedding(
             profile_id=profile_id,
             model_name=embedder.model_name,
@@ -391,15 +394,22 @@ def match_jobs(
         
         for i, match in enumerate(matches, 1):
             score = match["similarity_score"]
+            semantic = match.get("semantic_score", score)
+            skills_overlap = match.get("skills_overlap_score", 0.0)
+            matched_skills = match.get("matched_skills") or []
             title = match["title"] or "N/A"
             company = match.get("company_name") or "N/A"
             location = match.get("location") or "N/A"
             job_url = match.get("job_url") or "N/A"
-            
+
             console.print(f"[bold]{i}. {title}[/bold]")
             console.print(f"   Company: {company}")
             console.print(f"   Location: {location}")
-            console.print(f"   Match Score: [green]{score:.2%}[/green]")
+            console.print(f"   Match Score: [green]{score:.2%}[/green]  "
+                          f"(semantic: {semantic:.2%}, skills: {skills_overlap:.2%})")
+            if matched_skills:
+                console.print(f"   Matched Skills: [cyan]{', '.join(matched_skills[:8])}[/cyan]"
+                              + (f" +{len(matched_skills) - 8} more" if len(matched_skills) > 8 else ""))
             if job_url != "N/A":
                 console.print(f"   URL: [blue]{job_url}[/blue]")
             console.print()
@@ -459,6 +469,125 @@ def mark_interaction(
         console.print(f"  Job: {job.get('title', job_uuid)}")
         console.print(f"  Type: {interaction_type}")
         console.print(f"  User: {user_id}")
+    finally:
+        store.close()
+
+
+@app.command("re-embed")
+def re_embed(
+    db: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--db",
+            help="DuckDB file path (default: data/mcf.duckdb)",
+        ),
+    ] = None,
+    batch_size: Annotated[
+        int,
+        typer.Option(
+            "--batch-size",
+            "-b",
+            help="Embedding batch size",
+        ),
+    ] = 32,
+) -> None:
+    """Re-embed all jobs with the current model and structured text format.
+
+    Run this once after upgrading the embedding model or pipeline.
+
+    Jobs that were crawled before the structured-text update (and therefore have
+    no skills data stored) will be embedded using only their title.  They will
+    receive a richer embedding automatically on the next incremental crawl.
+
+    You should also re-run 'mcf process-resume' afterwards so that the
+    candidate embedding uses the same model as the jobs.
+    """
+    db_path = db or Path("data/mcf.duckdb")
+    if not db_path.exists():
+        console.print(f"[bold red]Error:[/bold red] Database not found at {db_path}")
+        console.print("Run 'mcf crawl-incremental' first to create the database.")
+        raise typer.Exit(1)
+
+    store = DuckDBStore(db_path)
+    try:
+        all_jobs = store.get_all_active_jobs()
+        if not all_jobs:
+            console.print("[yellow]No active jobs found in the database.[/yellow]")
+            return
+
+        console.print(f"[bold cyan]Re-embedding Jobs[/bold cyan]")
+        console.print(f"  Database: [green]{db_path.resolve()}[/green]")
+        console.print(f"  Active jobs: [yellow]{len(all_jobs):,}[/yellow]")
+        console.print(f"  Model: [green]BAAI/bge-small-en-v1.5[/green]")
+        console.print(f"  Batch size: [yellow]{batch_size}[/yellow]")
+        console.print()
+
+        embedder = Embedder(EmbedderConfig())
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TextColumn("•"),
+            TimeElapsedColumn(),
+            TextColumn("•"),
+            TimeRemainingColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("[cyan]Embedding...", total=len(all_jobs))
+
+            texts: list[str] = []
+            uuids: list[str] = []
+            embedded = 0
+
+            for job in all_jobs:
+                # Build text from stored fields (title + skills).
+                # Description is not stored, so we use what we have.
+                parts: list[str] = []
+                if job["title"]:
+                    parts.append(f"Job Title: {job['title']}")
+                if job["skills"]:
+                    parts.append(f"Required Skills: {', '.join(job['skills'])}")
+                job_text = "\n".join(parts) if parts else job["title"] or ""
+
+                if not job_text:
+                    progress.advance(task)
+                    continue
+
+                texts.append(job_text)
+                uuids.append(job["job_uuid"])
+
+                if len(texts) >= batch_size:
+                    embeddings = embedder.embed_texts(texts)
+                    for uuid, emb in zip(uuids, embeddings):
+                        store.upsert_embedding(
+                            job_uuid=uuid,
+                            model_name=embedder.model_name,
+                            embedding=emb,
+                        )
+                    embedded += len(texts)
+                    progress.advance(task, len(texts))
+                    texts, uuids = [], []
+
+            # Flush remaining
+            if texts:
+                embeddings = embedder.embed_texts(texts)
+                for uuid, emb in zip(uuids, embeddings):
+                    store.upsert_embedding(
+                        job_uuid=uuid,
+                        model_name=embedder.model_name,
+                        embedding=emb,
+                    )
+                embedded += len(texts)
+                progress.advance(task, len(texts))
+
+        console.print()
+        console.print("[bold green]Re-embedding complete![/bold green]")
+        console.print(f"  Jobs re-embedded: [cyan]{embedded:,}[/cyan]")
+        console.print()
+        console.print("[yellow]Tip:[/yellow] Run 'mcf process-resume' to update your resume "
+                      "embedding with the new model.")
     finally:
         store.close()
 

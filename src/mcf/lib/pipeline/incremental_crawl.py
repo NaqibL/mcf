@@ -9,6 +9,7 @@ from typing import Sequence
 from mcf.lib.api.client import MCFClient
 from mcf.lib.crawler.crawler import Crawler
 from mcf.lib.embeddings.embedder import Embedder, EmbedderConfig
+from mcf.lib.embeddings.job_text import build_job_text, extract_job_skills
 from mcf.lib.storage.base import RunStats, Storage
 
 
@@ -93,23 +94,28 @@ def run_incremental_crawl(
         if added:
             # Initialize embedder for generating embeddings
             embedder = Embedder(EmbedderConfig())
-            
+
             with MCFClient(rate_limit=rate_limit) as client:
                 for uuid in added:
                     detail = client.get_job_detail(uuid)
                     raw = detail.model_dump(by_alias=True, mode="json")
-                    title, company_name, location, description, job_url = _extract_best_effort_fields(raw)
-                    
-                    # Generate embedding from description (if available)
+                    title, company_name, location, _description, job_url = _extract_best_effort_fields(raw)
+
+                    # Build structured job text and extract skills from the API response.
+                    # This is richer than embedding raw description text:
+                    #   title + seniority level + skills list + first ~100-word snippet
+                    job_text = build_job_text(raw)
+                    skills = extract_job_skills(raw)
+
+                    # Generate embedding from structured job text
                     embedding = None
-                    if description:
+                    if job_text:
                         try:
-                            embedding = embedder.embed_text(description)
+                            embedding = embedder.embed_text(job_text)
                         except Exception as e:
-                            # Log error but continue - embedding generation is optional
                             print(f"Warning: Failed to generate embedding for job {uuid}: {e}")
-                    
-                    # Store job details (without description text)
+
+                    # Store job details (without raw description text to save space)
                     store.upsert_new_job_detail(
                         run_id=run.run_id,
                         job_uuid=uuid,
@@ -117,9 +123,10 @@ def run_incremental_crawl(
                         company_name=company_name,
                         location=location,
                         job_url=job_url,
-                        raw_json=None,  # Don't store raw_json to save space
+                        skills=skills or None,
+                        raw_json=None,
                     )
-                    
+
                     # Store embedding if generated
                     if embedding:
                         store.upsert_embedding(
