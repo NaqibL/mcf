@@ -20,6 +20,8 @@ from mcf.lib.crawler.crawler import CrawlProgress
 from mcf.lib.embeddings.embedder import Embedder, EmbedderConfig
 from mcf.lib.embeddings.resume import extract_resume_text
 from mcf.lib.pipeline.incremental_crawl import run_incremental_crawl
+from mcf.lib.sources.cag_source import CareersGovJobSource
+from mcf.lib.sources.mcf_source import MCFJobSource
 from mcf.lib.storage.base import Storage
 from mcf.lib.storage.duckdb_store import DuckDBStore
 
@@ -68,34 +70,52 @@ def crawl_incremental(
         Optional[str],
         typer.Option(
             "--categories",
-            help="Comma-separated category names (default: all categories)",
+            help="Comma-separated MCF category names (default: all; ignored for --source cag)",
         ),
     ] = None,
+    source: Annotated[
+        str,
+        typer.Option(
+            "--source",
+            help="Job source to crawl: mcf | cag | all (default: mcf)",
+        ),
+    ] = "mcf",
 ) -> None:
-    """Incrementally crawl jobs (fetch job detail only for newly-seen UUIDs)."""
-    # Use DuckDB only
+    """Incrementally crawl jobs (fetch job detail only for newly-seen UUIDs).
+
+    Use [bold]--source mcf[/bold] for MyCareersFuture, [bold]--source cag[/bold] for
+    Careers@Gov, or [bold]--source all[/bold] to crawl both sequentially.
+    """
+    valid_sources = {"mcf", "cag", "all"}
+    if source not in valid_sources:
+        console.print(f"[red]Invalid --source '{source}'. Must be one of: {', '.join(sorted(valid_sources))}[/red]")
+        raise typer.Exit(1)
+
     if db:
         store: Storage = DuckDBStore(db)
         db_display = f"DuckDB: {db.resolve()}"
     else:
-        # Default to DuckDB
         default_db = Path("data/mcf.duckdb")
         default_db.parent.mkdir(parents=True, exist_ok=True)
         store = DuckDBStore(default_db)
         db_display = f"DuckDB: {default_db.resolve()}"
 
-    console.print(f"[bold cyan]MCF Incremental Crawler[/bold cyan]")
+    console.print(f"[bold cyan]Incremental Crawler[/bold cyan]")
+    console.print(f"  Source: [magenta]{source}[/magenta]")
     console.print(f"  Storage: [green]{db_display}[/green]")
     console.print(f"  Rate limit: [yellow]{rate_limit}[/yellow] req/s")
     if limit:
         console.print(f"  Limit: [yellow]{limit}[/yellow] jobs")
-    if categories:
-        console.print(f"  Categories: [yellow]{categories}[/yellow]")
+    if categories and source in ("mcf", "all"):
+        console.print(f"  Categories (MCF): [yellow]{categories}[/yellow]")
     console.print()
 
     cats = [c.strip() for c in categories.split(",") if c.strip()] if categories else None
 
-    try:
+    def _run_source(source_obj, source_label: str, cats_arg=None) -> None:
+        """Run incremental crawl for a single source with a progress bar."""
+        console.print(f"[bold]Crawling [magenta]{source_label}[/magenta]...[/bold]")
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -107,7 +127,7 @@ def crawl_incremental(
             TimeRemainingColumn(),
             console=console,
         ) as progress:
-            task = progress.add_task("[cyan]Listing UUIDs...", total=None)
+            task = progress.add_task(f"[cyan]Listing {source_label} jobs...", total=None)
 
             def on_progress(p: CrawlProgress) -> None:
                 progress.update(task, total=p.total_jobs, completed=p.fetched)
@@ -119,19 +139,29 @@ def crawl_incremental(
 
             result = run_incremental_crawl(
                 store=store,
+                source=source_obj,
                 rate_limit=rate_limit,
-                categories=cats,
+                categories=cats_arg,
                 limit=limit,
                 on_progress=on_progress,
             )
 
         console.print()
-        # Avoid Unicode checkmark which can crash on legacy Windows terminals (cp1252).
-        console.print("[bold green]Incremental crawl complete[/bold green]")
+        console.print(f"[bold green]{source_label} crawl complete[/bold green]")
         console.print(f"  Total seen: [cyan]{result.total_seen:,}[/cyan]")
         console.print(f"  Added: [cyan]{len(result.added):,}[/cyan]")
         console.print(f"  Maintained: [cyan]{len(result.maintained):,}[/cyan]")
         console.print(f"  Removed: [cyan]{len(result.removed):,}[/cyan]")
+        console.print()
+
+    try:
+        if source == "mcf":
+            _run_source(MCFJobSource(rate_limit=rate_limit), "MyCareersFuture", cats_arg=cats)
+        elif source == "cag":
+            _run_source(CareersGovJobSource(rate_limit=rate_limit), "Careers@Gov")
+        else:  # "all"
+            _run_source(MCFJobSource(rate_limit=rate_limit), "MyCareersFuture", cats_arg=cats)
+            _run_source(CareersGovJobSource(rate_limit=rate_limit), "Careers@Gov")
     finally:
         store.close()
 

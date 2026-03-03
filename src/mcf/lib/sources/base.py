@@ -47,9 +47,28 @@ class JobSource(Protocol):
         limit: int | None = None,
         on_progress=None,
     ) -> list[str]:
-        """List job IDs (external IDs) from this source."""
+        """List job IDs from this source.
+
+        The returned IDs must be in ``job_uuid`` form — i.e. exactly what is
+        (or will be) stored as ``job_uuid`` in the database.  This is required
+        so the incremental pipeline can diff the result set against
+        ``store.existing_job_uuids()`` without an extra translation step.
+
+        For MCF the ``job_uuid`` equals the bare external UUID, so there is no
+        difference.  For every other source the ``job_uuid`` is prefixed with
+        ``"{source_id}:"`` (e.g. ``"cag:15219929_005056a3-..."``).  The source
+        implementation is responsible for applying (and later stripping) this
+        prefix in :meth:`get_job_detail`.
+        """
         ...
 
-    def get_job_detail(self, external_id: str) -> NormalizedJob:
-        """Fetch job detail and return as NormalizedJob."""
+    def get_job_detail(self, job_uuid: str) -> NormalizedJob:
+        """Fetch job detail and return as NormalizedJob.
+
+        Args:
+            job_uuid: The ID exactly as returned by :meth:`list_job_ids`.
+                For non-MCF sources this will be prefixed
+                (e.g. ``"cag:15219929_..."``); implementations should strip
+                the prefix before calling their upstream API.
+        """
         ...
