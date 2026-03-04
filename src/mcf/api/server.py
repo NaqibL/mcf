@@ -2,32 +2,45 @@
 
 from __future__ import annotations
 
+import secrets
 from contextlib import asynccontextmanager
-
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 
+import httpx
+from fastapi import Depends, FastAPI, HTTPException, Query, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+
+from mcf.api.auth import get_current_user
 from mcf.api.config import settings
 from mcf.api.services.matching_service import MatchingService
 from mcf.lib.embeddings.base import EmbedderProtocol
 from mcf.lib.embeddings.embedder import Embedder, EmbedderConfig
 from mcf.lib.embeddings.resume import extract_resume_text
 from mcf.lib.storage.base import Storage
-from mcf.lib.storage.duckdb_store import DuckDBStore
 
-# Global store instance
+
+def _make_store() -> Storage:
+    """Return a DuckDBStore or PostgresStore depending on DATABASE_URL."""
+    if settings.database_url:
+        from mcf.lib.storage.postgres_store import PostgresStore
+
+        return PostgresStore(settings.database_url)
+
+    from mcf.lib.storage.duckdb_store import DuckDBStore
+
+    db_path = Path(settings.db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return DuckDBStore(str(db_path))
+
+
+# Global store — initialised in lifespan
 _store: Storage | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifespan context manager for FastAPI."""
     global _store
-    # Ensure data directory exists
-    db_path = Path(settings.db_path)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    _store = DuckDBStore(settings.db_path)
+    _store = _make_store()
     yield
     if _store:
         _store.close()
@@ -37,7 +50,7 @@ app = FastAPI(title="Job Matcher API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -45,57 +58,64 @@ app.add_middleware(
 
 
 def get_store() -> Storage:
-    """Get storage instance."""
     if _store is None:
-        raise RuntimeError("Store not initialized")
+        raise RuntimeError("Store not initialised")
     return _store
 
 
+# ---------------------------------------------------------------------------
 # Job endpoints
+# ---------------------------------------------------------------------------
+
+
 @app.post("/api/jobs/{job_uuid}/interact")
 def mark_interaction(
     job_uuid: str,
-    interaction_type: str = Query(..., description="Interaction type: viewed, dismissed, applied, saved, interested, not_interested"),
+    interaction_type: str = Query(
+        ...,
+        description="Interaction type: viewed, dismissed, interested, not_interested",
+    ),
+    user_id: str = Depends(get_current_user),
 ):
-    """Mark a job as interacted with."""
+    """Record a user interaction with a job (interested / not_interested / …)."""
     store = get_store()
-    user_id = settings.default_user_id
-
     valid_types = {"viewed", "dismissed", "applied", "saved", "interested", "not_interested"}
     if interaction_type not in valid_types:
-        raise HTTPException(status_code=400, detail=f"Invalid interaction type. Must be one of: {', '.join(sorted(valid_types))}")
-
-    # Verify job exists
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid interaction type. Must be one of: {', '.join(sorted(valid_types))}",
+        )
     job = store.get_job(job_uuid)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-
     store.record_interaction(user_id=user_id, job_uuid=job_uuid, interaction_type=interaction_type)
     return {"status": "ok", "job_uuid": job_uuid, "interaction_type": interaction_type}
 
 
+# ---------------------------------------------------------------------------
 # Discover endpoints
+# ---------------------------------------------------------------------------
+
+
 @app.get("/api/discover/stats")
-def get_discover_stats():
+def get_discover_stats(user_id: str = Depends(get_current_user)):
     """Return counts of interested, not_interested, and unrated jobs."""
     store = get_store()
-    if not isinstance(store, DuckDBStore):
-        raise HTTPException(status_code=500, detail="DuckDB store required")
-    user_id = settings.default_user_id
     return store.get_discover_stats(user_id=user_id)
 
 
+# ---------------------------------------------------------------------------
 # Profile endpoints
+# ---------------------------------------------------------------------------
+
+
 @app.get("/api/profile")
-def get_profile():
+def get_profile(user_id: str = Depends(get_current_user)):
     """Get current user profile and resume status."""
     store = get_store()
-    user_id = settings.default_user_id
-    
     profile = store.get_profile_by_user_id(user_id)
     resume_path = Path(settings.resume_path)
     resume_exists = resume_path.exists()
-    
     return {
         "user_id": user_id,
         "profile": profile,
@@ -105,73 +125,136 @@ def get_profile():
 
 
 @app.post("/api/profile/process-resume")
-def process_resume():
-    """Process resume from file path and create/update profile."""
+def process_resume(user_id: str = Depends(get_current_user)):
+    """Process resume from the configured file path and create/update profile."""
     store = get_store()
-    user_id = settings.default_user_id
     resume_path = Path(settings.resume_path)
-
     if not resume_path.exists():
-        raise HTTPException(status_code=404, detail=f"Resume file not found at {resume_path}")
-
+        raise HTTPException(
+            status_code=404, detail=f"Resume file not found at {resume_path}"
+        )
     try:
-        import secrets as _secrets
-
         resume_text = extract_resume_text(resume_path)
+        return _process_resume_text(store, user_id, resume_text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process resume: {e}")
 
-        profile = store.get_profile_by_user_id(user_id)
-        if profile:
-            profile_id = profile["profile_id"]
-            store.update_profile(profile_id=profile_id, raw_resume_text=resume_text)
-        else:
-            profile_id = _secrets.token_urlsafe(16)
-            store.create_profile(
-                profile_id=profile_id,
-                user_id=user_id,
-                raw_resume_text=resume_text,
-            )
 
-        # Use embed_query (BGE query-side prefix) for the resume
-        embedder: EmbedderProtocol = Embedder(EmbedderConfig())
-        embedding = embedder.embed_query(resume_text)
-        store.upsert_candidate_embedding(
-            profile_id=profile_id,
-            model_name=embedder.model_name,
-            embedding=embedding,
+@app.post("/api/profile/upload-resume")
+async def upload_resume(
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user),
+):
+    """Upload a resume file, extract its text, and update the profile + embedding.
+
+    Accepts PDF or DOCX.  If Supabase Storage is configured the raw file is
+    also stored there so it can be re-processed later.
+    """
+    allowed = {
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
+    if file.content_type not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{file.content_type}'. Upload a PDF or DOCX.",
         )
 
-        return {
-            "status": "ok",
-            "profile_id": profile_id,
-            "message": "Resume processed successfully",
-        }
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    # Optionally push to Supabase Storage
+    storage_path: str | None = None
+    if settings.storage_enabled:
+        storage_path = await _upload_to_supabase(data, user_id, file.filename or "resume.pdf")
+
+    try:
+        resume_text = extract_resume_text(data)
+        store = get_store()
+        result = _process_resume_text(store, user_id, resume_text, storage_path=storage_path)
+        result["storage_path"] = storage_path
+        return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to process resume: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to process resume: {e}")
+
+
+def _process_resume_text(
+    store: Storage, user_id: str, resume_text: str, storage_path: str | None = None
+) -> dict:
+    """Create/update profile + embedding from resume text. Returns response dict."""
+    profile = store.get_profile_by_user_id(user_id)
+    if profile:
+        profile_id = profile["profile_id"]
+        store.update_profile(
+            profile_id=profile_id,
+            raw_resume_text=resume_text,
+            resume_storage_path=storage_path,
+        )
+    else:
+        profile_id = secrets.token_urlsafe(16)
+        store.create_profile(
+            profile_id=profile_id,
+            user_id=user_id,
+            raw_resume_text=resume_text,
+        )
+        if storage_path:
+            store.update_profile(profile_id=profile_id, resume_storage_path=storage_path)
+
+    embedder: EmbedderProtocol = Embedder(EmbedderConfig())
+    embedding = embedder.embed_query(resume_text)
+    store.upsert_candidate_embedding(
+        profile_id=profile_id,
+        model_name=embedder.model_name,
+        embedding=embedding,
+    )
+    return {"status": "ok", "profile_id": profile_id, "message": "Resume processed successfully"}
+
+
+async def _upload_to_supabase(data: bytes, user_id: str, filename: str) -> str:
+    """Upload file bytes to Supabase Storage and return the storage path."""
+    ext = Path(filename).suffix or ".pdf"
+    path = f"resumes/{user_id}/resume{ext}"
+    url = f"{settings.supabase_url}/storage/v1/object/resumes/{user_id}/resume{ext}"
+    headers = {
+        "Authorization": f"Bearer {settings.supabase_service_key}",
+        "Content-Type": "application/octet-stream",
+        "x-upsert": "true",
+    }
+    async with httpx.AsyncClient() as client:
+        resp = await client.put(url, content=data, headers=headers, timeout=30.0)
+        if resp.status_code not in (200, 201):
+            raise HTTPException(
+                status_code=502,
+                detail=f"Supabase Storage upload failed: {resp.status_code} {resp.text}",
+            )
+    return path
+
+
+# ---------------------------------------------------------------------------
+# Matching endpoints
+# ---------------------------------------------------------------------------
 
 
 @app.post("/api/profile/compute-taste")
-def compute_taste():
-    """Compute and store a taste-profile embedding from the user's Interested/Not Interested ratings."""
+def compute_taste(user_id: str = Depends(get_current_user)):
+    """Build / refresh the taste-profile embedding from Interested/Not Interested ratings."""
     store = get_store()
-    if not isinstance(store, DuckDBStore):
-        raise HTTPException(status_code=500, detail="DuckDB store required")
-    user_id = settings.default_user_id
-
     profile = store.get_profile_by_user_id(user_id)
     if not profile:
-        raise HTTPException(status_code=404, detail="No profile found. Please process your resume first.")
-
-    profile_id = profile["profile_id"]
-    matching_service = MatchingService(store)
-    result = matching_service.compute_and_store_taste(profile_id=profile_id, user_id=user_id)
-
+        raise HTTPException(
+            status_code=404, detail="No profile found. Please process your resume first."
+        )
+    result = MatchingService(store).compute_and_store_taste(
+        profile_id=profile["profile_id"], user_id=user_id
+    )
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("reason", "Failed to compute taste profile"))
-
+        raise HTTPException(
+            status_code=400, detail=result.get("reason", "Failed to compute taste profile")
+        )
     return result
 
 
-# Matching endpoints
 @app.get("/api/matches")
 def get_matches(
     exclude_interacted: bool = True,
@@ -179,20 +262,13 @@ def get_matches(
     min_similarity: float = 0.0,
     max_days_old: int | None = None,
     mode: str = "resume",
+    user_id: str = Depends(get_current_user),
 ):
     """Get job matches for the current user.
 
-    Args:
-        mode: ``resume`` uses the resume embedding (default);
-              ``taste`` uses the taste-profile embedding built from ratings.
-        exclude_interacted: Filter out jobs the user has already interacted with.
-        top_k: Number of top matches to return.
-        min_similarity: Minimum similarity threshold (0.0 to 1.0).
-        max_days_old: Maximum age of job posting in days (None = no limit).
+    *mode* is ``resume`` (default) or ``taste``.
     """
     store = get_store()
-    user_id = settings.default_user_id
-
     if mode not in ("resume", "taste"):
         raise HTTPException(status_code=400, detail="mode must be 'resume' or 'taste'")
     if not 0.0 <= min_similarity <= 1.0:
@@ -202,21 +278,24 @@ def get_matches(
 
     profile = store.get_profile_by_user_id(user_id)
     if not profile:
-        raise HTTPException(status_code=404, detail="No profile found. Please process your resume first.")
+        raise HTTPException(
+            status_code=404, detail="No profile found. Please process your resume first."
+        )
 
     profile_id = profile["profile_id"]
-    matching_service = MatchingService(store)
+    svc = MatchingService(store)
 
     if mode == "taste":
-        if not isinstance(store, DuckDBStore):
-            raise HTTPException(status_code=500, detail="DuckDB store required for taste mode")
         taste_emb = store.get_taste_embedding(profile_id)
         if not taste_emb:
             raise HTTPException(
                 status_code=400,
-                detail="No taste profile found. Go to Discover, rate some jobs, then click 'Update Taste Profile'.",
+                detail=(
+                    "No taste profile found. Go to Discover, rate some jobs, "
+                    "then click 'Update Taste Profile'."
+                ),
             )
-        matches = matching_service.match_taste_to_jobs(
+        matches = svc.match_taste_to_jobs(
             profile_id=profile_id,
             top_k=top_k,
             exclude_rated=exclude_interacted,
@@ -225,7 +304,7 @@ def get_matches(
             max_days_old=max_days_old,
         )
     else:
-        matches = matching_service.match_candidate_to_jobs(
+        matches = svc.match_candidate_to_jobs(
             profile_id=profile_id,
             top_k=top_k,
             exclude_interacted=exclude_interacted,
@@ -235,6 +314,11 @@ def get_matches(
         )
 
     return {"matches": matches, "total": len(matches), "mode": mode}
+
+
+# ---------------------------------------------------------------------------
+# Utility
+# ---------------------------------------------------------------------------
 
 
 @app.get("/api/health")

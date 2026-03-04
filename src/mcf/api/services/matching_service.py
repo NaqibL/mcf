@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from mcf.lib.storage.duckdb_store import DuckDBStore
+from mcf.lib.storage.base import Storage
 
 # Weights for the hybrid score: semantic similarity + skills keyword overlap.
 # Semantic embedding captures overall role alignment; skills overlap is a hard
@@ -20,7 +20,7 @@ _SKILLS_WEIGHT = 0.35
 class MatchingService:
     """Service for matching candidates to jobs and vice versa."""
 
-    def __init__(self, store: DuckDBStore) -> None:
+    def __init__(self, store: Storage) -> None:
         self.store = store
 
     @staticmethod
@@ -197,14 +197,7 @@ class MatchingService:
         else:
             taste_vec = positive_mean.tolist()
 
-        # Retrieve model name from an existing job embedding
-        model_name = pos_pairs[0][0] if pos_pairs else "BAAI/bge-small-en-v1.5"
-        # Get the actual model name from job_embeddings
-        row = self.store._con.execute(
-            "SELECT model_name FROM job_embeddings LIMIT 1"
-        ).fetchone()
-        if row:
-            model_name = row[0]
+        model_name = self.store.get_embedding_model_name() or "BAAI/bge-small-en-v1.5"
 
         self.store.upsert_taste_embedding(
             profile_id=profile_id,

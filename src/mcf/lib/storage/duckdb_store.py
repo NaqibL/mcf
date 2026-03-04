@@ -188,6 +188,12 @@ class DuckDBStore(Storage):
         self._con.execute("CREATE INDEX IF NOT EXISTS idx_matches_profile ON matches(profile_id)")
         self._con.execute("CREATE INDEX IF NOT EXISTS idx_matches_job ON matches(job_uuid)")
 
+        # Migration: add resume_storage_path column for Supabase Storage paths
+        try:
+            self._con.execute("ALTER TABLE candidate_profiles ADD COLUMN resume_storage_path TEXT")
+        except duckdb.ProgrammingError:
+            pass
+
     def begin_run(self, *, kind: str, categories: Sequence[str] | None) -> RunStats:
         started_at = _utcnow()
         run_id = started_at.strftime("%Y%m%dT%H%M%S.%fZ")
@@ -402,6 +408,25 @@ class DuckDBStore(Storage):
             })
         return result
 
+    def get_embedding_model_name(self) -> str | None:
+        """Return the model name used for the most recent job embedding, or None."""
+        row = self._con.execute("SELECT model_name FROM job_embeddings LIMIT 1").fetchone()
+        return row[0] if row else None
+
+    def upsert_user(self, *, user_id: str, email: str, role: str = "candidate") -> None:
+        """Create or update a user record (no password — auth handled by Supabase)."""
+        now = _utcnow()
+        self._con.execute(
+            """
+            INSERT INTO users(user_id, email, role, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (user_id) DO UPDATE SET
+              email = EXCLUDED.email,
+              role = EXCLUDED.role
+            """,
+            [user_id, email, role, now],
+        )
+
     # User management
     def create_user(self, *, user_id: str, email: str, password_hash: str, role: str = "candidate") -> None:
         """Create a new user."""
@@ -514,6 +539,7 @@ class DuckDBStore(Storage):
         expanded_profile_json: dict | None = None,
         skills_json: list[str] | None = None,
         experience_json: list[dict] | None = None,
+        resume_storage_path: str | None = None,
     ) -> None:
         """Update a candidate profile."""
         now = _utcnow()
@@ -531,6 +557,9 @@ class DuckDBStore(Storage):
         if experience_json is not None:
             updates.append("experience_json = ?")
             values.append(json.dumps(experience_json))
+        if resume_storage_path is not None:
+            updates.append("resume_storage_path = ?")
+            values.append(resume_storage_path)
         updates.append("updated_at = ?")
         values.append(now)
         values.append(profile_id)

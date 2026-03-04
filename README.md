@@ -81,7 +81,60 @@ Open http://localhost:3000 and click "Find Matches"
 
 ## Usage
 
-### CLI Commands
+### Commands Reference
+
+**Crawling:**
+```bash
+# Careers@Gov only (~2000 jobs, keyword partitioning)
+uv run mcf crawl-incremental --source cag
+
+# MyCareersFuture only
+uv run mcf crawl-incremental --source mcf
+
+# Both sources
+uv run mcf crawl-incremental --source all
+
+# Test with limit
+uv run mcf crawl-incremental --source cag --limit 50
+
+# MCF with category filter
+uv run mcf crawl-incremental --source mcf --categories "Information Technology"
+
+# Custom database path
+uv run mcf crawl-incremental --db path/to/custom.duckdb
+```
+
+**Web dashboard:**
+```bash
+# Terminal 1: API server
+uv run uvicorn mcf.api.server:app --reload --port 8000
+
+# Terminal 2: Frontend
+cd frontend && npm run dev
+
+# Open http://localhost:3000
+```
+
+**Resume & matching:**
+```bash
+# Process resume
+uv run mcf process-resume
+uv run mcf process-resume --resume path/to/resume.pdf
+
+# Find matches (CLI)
+uv run mcf match-jobs
+uv run mcf match-jobs --top-k 50 --include-interacted
+```
+
+**Interactions:**
+```bash
+uv run mcf mark-interaction <job-uuid> --type viewed
+uv run mcf mark-interaction <job-uuid> --type applied
+uv run mcf mark-interaction <job-uuid> --type dismissed
+uv run mcf mark-interaction <job-uuid> --type saved
+```
+
+### CLI Commands (detailed)
 
 **Process resume:**
 ```bash
@@ -149,24 +202,58 @@ mcf crawl --output data/jobs
 
 - **Backend**: FastAPI (Python)
 - **Frontend**: Next.js 14 (React, TypeScript)
-- **Database**: DuckDB (local file-based, no server needed)
+- **Database**: DuckDB (local) **or** PostgreSQL / Supabase (hosted)
+- **Auth**: Supabase magic-link (optional — local dev works without it)
 - **Storage**: Only stores embeddings + basic info + URLs (no full descriptions)
 
 ## Configuration
 
-Default paths (can be overridden via environment variables):
+Copy `.env.example` to `.env` and fill in the values.  For local dev the defaults work out of the box.
 
-- Database: `data/mcf.duckdb`
-- Resume: `resume/resume.pdf`
-- User ID: `default_user`
+Key variables:
 
-Set via environment variables:
-```bash
-export DB_PATH=data/mcf.duckdb
-export RESUME_PATH=resume/resume.pdf
-export DEFAULT_USER_ID=default_user
-export API_PORT=8000
-```
+| Variable | Default | Purpose |
+|---|---|---|
+| `DB_PATH` | `data/mcf.duckdb` | Local DuckDB path |
+| `DATABASE_URL` | *(unset)* | Postgres URL — activates hosted mode |
+| `RESUME_PATH` | `resume/resume.pdf` | Local resume path (dev fallback) |
+| `SUPABASE_JWT_SECRET` | *(unset)* | Enables auth when set |
+| `SUPABASE_URL` | *(unset)* | Enables file storage when set |
+| `SUPABASE_SERVICE_KEY` | *(unset)* | Required with `SUPABASE_URL` |
+| `ALLOWED_ORIGINS` | `http://localhost:3000` | Comma-separated CORS origins |
+
+## Deployment (~$5/month)
+
+This stack runs for ~$5/month using free-tier services plus Railway Hobby.
+
+| Service | Cost | Purpose |
+|---|---|---|
+| **Supabase** | Free | Postgres DB + Auth + File Storage |
+| **Railway Hobby** | $5/mo | Python API (always-on, 8 GB RAM) |
+| **Vercel** | Free | Next.js frontend |
+| **GitHub Actions** | Free | Daily crawl cron |
+
+### Steps
+
+1. **Create a Supabase project** at [supabase.com](https://supabase.com)
+   - Run `scripts/schema.sql` in the SQL editor
+   - Copy the Postgres connection string, JWT secret, URL, and service key
+
+2. **Deploy the API to Railway**
+   - Connect your GitHub repo, select `Dockerfile.api`
+   - Set environment variables: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_JWT_SECRET`, `ALLOWED_ORIGINS`
+
+3. **Deploy the frontend to Vercel**
+   - Set `NEXT_PUBLIC_API_URL` to your Railway API URL
+   - Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+4. **Add GitHub Actions secret**
+   - In your repo settings → Secrets, add `DATABASE_URL` (same Supabase Postgres URL)
+   - The daily crawl will run at 02:00 UTC every day
+
+5. **Invite users**
+   - In Supabase Dashboard → Authentication → Users, invite users by email
+   - They receive a magic link and sign in — no password needed
 
 ## Development Guide
 

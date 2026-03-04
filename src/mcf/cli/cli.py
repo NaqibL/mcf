@@ -25,6 +25,21 @@ from mcf.lib.sources.mcf_source import MCFJobSource
 from mcf.lib.storage.base import Storage
 from mcf.lib.storage.duckdb_store import DuckDBStore
 
+
+def _open_store(db: Path | None, db_url: str | None) -> tuple[Storage, str]:
+    """Return (store, display_label) based on which option was given.
+
+    Priority: --db-url (Postgres) > --db (DuckDB path) > default DuckDB.
+    """
+    if db_url:
+        from mcf.lib.storage.postgres_store import PostgresStore
+
+        return PostgresStore(db_url), f"Postgres: {db_url[:40]}…"
+
+    db_path = db or Path("data/mcf.duckdb")
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return DuckDBStore(str(db_path)), f"DuckDB: {db_path.resolve()}"
+
 app = typer.Typer(
     name="mcf",
     help="MyCareersFuture job crawler CLI",
@@ -45,10 +60,11 @@ console = Console()
 def crawl_incremental(
     db: Annotated[
         Optional[Path],
-        typer.Option(
-            "--db",
-            help="DuckDB file path (default: data/mcf.duckdb)",
-        ),
+        typer.Option("--db", help="DuckDB file path (default: data/mcf.duckdb)"),
+    ] = None,
+    db_url: Annotated[
+        Optional[str],
+        typer.Option("--db-url", help="PostgreSQL connection URL (overrides --db)", envvar="DATABASE_URL"),
     ] = None,
     rate_limit: Annotated[
         float,
@@ -91,14 +107,7 @@ def crawl_incremental(
         console.print(f"[red]Invalid --source '{source}'. Must be one of: {', '.join(sorted(valid_sources))}[/red]")
         raise typer.Exit(1)
 
-    if db:
-        store: Storage = DuckDBStore(db)
-        db_display = f"DuckDB: {db.resolve()}"
-    else:
-        default_db = Path("data/mcf.duckdb")
-        default_db.parent.mkdir(parents=True, exist_ok=True)
-        store = DuckDBStore(default_db)
-        db_display = f"DuckDB: {default_db.resolve()}"
+    store, db_display = _open_store(db, db_url)
 
     console.print(f"[bold cyan]Incremental Crawler[/bold cyan]")
     console.print(f"  Source: [magenta]{source}[/magenta]")
@@ -170,43 +179,34 @@ def crawl_incremental(
 def process_resume(
     resume_path: Annotated[
         Path,
-        typer.Option(
-            "--resume",
-            "-r",
-            help="Path to resume file (default: resume/resume.pdf)",
-        ),
+        typer.Option("--resume", "-r", help="Path to resume file (default: resume/resume.pdf)"),
     ] = Path("resume/resume.pdf"),
     user_id: Annotated[
         str,
-        typer.Option(
-            "--user-id",
-            "-u",
-            help="User ID (default: default_user)",
-        ),
+        typer.Option("--user-id", "-u", help="User ID (default: default_user)"),
     ] = "default_user",
     db: Annotated[
         Optional[Path],
-        typer.Option(
-            "--db",
-            help="DuckDB file path (default: data/mcf.duckdb)",
-        ),
+        typer.Option("--db", help="DuckDB file path (default: data/mcf.duckdb)"),
+    ] = None,
+    db_url: Annotated[
+        Optional[str],
+        typer.Option("--db-url", help="PostgreSQL connection URL (overrides --db)", envvar="DATABASE_URL"),
     ] = None,
 ) -> None:
     """Process resume from file and create profile for matching."""
-    db_path = db or Path("data/mcf.duckdb")
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    store = DuckDBStore(db_path)
-    
+    store, db_display = _open_store(db, db_url)
+
     try:
         if not resume_path.exists():
             console.print(f"[bold red]Error:[/bold red] Resume file not found at {resume_path}")
             console.print(f"Please place your resume file at: {resume_path}")
             raise typer.Exit(1)
-        
+
         console.print(f"[bold cyan]Processing Resume[/bold cyan]")
         console.print(f"  Resume: [green]{resume_path.resolve()}[/green]")
         console.print(f"  User ID: [yellow]{user_id}[/yellow]")
-        console.print(f"  Database: [green]{db_path.resolve()}[/green]")
+        console.print(f"  Database: [green]{db_display}[/green]")
         console.print()
         
         # Extract resume text
@@ -254,38 +254,27 @@ def process_resume(
 def match_jobs(
     user_id: Annotated[
         str,
-        typer.Option(
-            "--user-id",
-            "-u",
-            help="User ID (default: default_user)",
-        ),
+        typer.Option("--user-id", "-u", help="User ID (default: default_user)"),
     ] = "default_user",
     top_k: Annotated[
         int,
-        typer.Option(
-            "--top-k",
-            "-k",
-            help="Number of top matches to return",
-        ),
+        typer.Option("--top-k", "-k", help="Number of top matches to return"),
     ] = 25,
     exclude_interacted: Annotated[
         bool,
-        typer.Option(
-            "--exclude-interacted/--include-interacted",
-            help="Exclude jobs user has interacted with",
-        ),
+        typer.Option("--exclude-interacted/--include-interacted", help="Exclude jobs user has interacted with"),
     ] = True,
     db: Annotated[
         Optional[Path],
-        typer.Option(
-            "--db",
-            help="DuckDB file path (default: data/mcf.duckdb)",
-        ),
+        typer.Option("--db", help="DuckDB file path (default: data/mcf.duckdb)"),
+    ] = None,
+    db_url: Annotated[
+        Optional[str],
+        typer.Option("--db-url", help="PostgreSQL connection URL (overrides --db)", envvar="DATABASE_URL"),
     ] = None,
 ) -> None:
     """Find matching jobs for uploaded resume."""
-    db_path = db or Path("data/mcf.duckdb")
-    store = DuckDBStore(db_path)
+    store, _ = _open_store(db, db_url)
     
     try:
         # Get profile
@@ -408,18 +397,15 @@ def mark_interaction(
 def re_embed(
     db: Annotated[
         Optional[Path],
-        typer.Option(
-            "--db",
-            help="DuckDB file path (default: data/mcf.duckdb)",
-        ),
+        typer.Option("--db", help="DuckDB file path (default: data/mcf.duckdb)"),
+    ] = None,
+    db_url: Annotated[
+        Optional[str],
+        typer.Option("--db-url", help="PostgreSQL connection URL (overrides --db)", envvar="DATABASE_URL"),
     ] = None,
     batch_size: Annotated[
         int,
-        typer.Option(
-            "--batch-size",
-            "-b",
-            help="Embedding batch size",
-        ),
+        typer.Option("--batch-size", "-b", help="Embedding batch size"),
     ] = 32,
 ) -> None:
     """Re-embed all jobs with the current model and structured text format.
@@ -433,13 +419,14 @@ def re_embed(
     You should also re-run 'mcf process-resume' afterwards so that the
     candidate embedding uses the same model as the jobs.
     """
-    db_path = db or Path("data/mcf.duckdb")
-    if not db_path.exists():
-        console.print(f"[bold red]Error:[/bold red] Database not found at {db_path}")
-        console.print("Run 'mcf crawl-incremental' first to create the database.")
-        raise typer.Exit(1)
+    if not db_url:
+        db_path = db or Path("data/mcf.duckdb")
+        if not db_path.exists():
+            console.print(f"[bold red]Error:[/bold red] Database not found at {db_path}")
+            console.print("Run 'mcf crawl-incremental' first to create the database.")
+            raise typer.Exit(1)
 
-    store = DuckDBStore(db_path)
+    store, db_display = _open_store(db, db_url)
     try:
         all_jobs = store.get_all_active_jobs()
         if not all_jobs:
@@ -447,7 +434,7 @@ def re_embed(
             return
 
         console.print(f"[bold cyan]Re-embedding Jobs[/bold cyan]")
-        console.print(f"  Database: [green]{db_path.resolve()}[/green]")
+        console.print(f"  Database: [green]{db_display}[/green]")
         console.print(f"  Active jobs: [yellow]{len(all_jobs):,}[/yellow]")
         console.print(f"  Model: [green]BAAI/bge-small-en-v1.5[/green]")
         console.print(f"  Batch size: [yellow]{batch_size}[/yellow]")

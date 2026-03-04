@@ -36,6 +36,50 @@ _ALGOLIA_HEADERS = {
 _SOURCE_ID = "cag"
 _PREFIX = f"{_SOURCE_ID}:"
 
+# Keywords for partitioning: Algolia search returns max 1000 per query.
+# Multiple keyword searches + dedupe yields ~99%+ of jobs (index has no facets).
+_LIST_KEYWORDS = [
+    "",
+    "engineer",
+    "manager",
+    "officer",
+    "director",
+    "analyst",
+    "executive",
+    "assistant",
+    "specialist",
+    "administrator",
+    "consultant",
+    "coordinator",
+    "developer",
+    "designer",
+    "technician",
+    "inspector",
+    "supervisor",
+    "lead",
+    "head",
+    "principal",
+    "senior",
+    "junior",
+    "research",
+    "policy",
+    "legal",
+    "finance",
+    "human",
+    "communications",
+    "operations",
+    "project",
+    "programme",
+    "data",
+    "digital",
+    "cyber",
+    "security",
+    "health",
+    "education",
+    "social",
+    "environment",
+]
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -159,37 +203,37 @@ class CareersGovJobSource:
         limit: int | None = None,
         on_progress=None,
     ) -> list[str]:
-        """List all Careers@Gov job IDs via Algolia pagination.
+        """List Careers@Gov job IDs via Algolia keyword partitioning.
+
+        Algolia search returns max 1000 hits per query. We run multiple
+        searches with different job-title keywords and deduplicate to
+        retrieve ~99%+ of the index.
 
         Returns IDs in prefixed ``job_uuid`` form: ``"cag:{objectID}"``.
 
         The ``categories`` parameter is accepted for protocol compatibility but
         ignored — Careers@Gov does not use the same category taxonomy as MCF.
         """
+        seen: set[str] = set()
         job_uuids: list[str] = []
-        page = 0
-        hits_per_page = 1000
 
         with httpx.Client(headers=_ALGOLIA_HEADERS, timeout=30.0) as client:
-            while True:
+            for i, keyword in enumerate(_LIST_KEYWORDS):
                 payload = {
-                    "query": "",
-                    "hitsPerPage": hits_per_page,
-                    "page": page,
+                    "query": keyword,
+                    "hitsPerPage": 1000,
+                    "page": 0,
                     "attributesToRetrieve": ["objectID"],
                 }
                 response = client.post(_ALGOLIA_SEARCH_URL, json=payload)
                 response.raise_for_status()
                 data = response.json()
 
-                hits = data.get("hits", [])
-                if not hits:
-                    break
-
-                for hit in hits:
+                for hit in data.get("hits", []):
                     object_id = hit.get("objectID")
-                    if not object_id:
+                    if not object_id or object_id in seen:
                         continue
+                    seen.add(object_id)
                     job_uuids.append(f"{_PREFIX}{object_id}")
 
                     if limit and len(job_uuids) >= limit:
@@ -203,12 +247,6 @@ class CareersGovJobSource:
 
                 if limit and len(job_uuids) >= limit:
                     break
-
-                nb_pages = data.get("nbPages", 1)
-                if page + 1 >= nb_pages:
-                    break
-
-                page += 1
 
         return job_uuids
 
@@ -246,13 +284,6 @@ class CareersGovJobSource:
             response = client.get(algolia_url)
             response.raise_for_status()
             raw = response.json()
-
-        # #region agent log
-        if not posting_uuid:
-            import json, time as _time
-            _log = {"sessionId":"25caa1","runId":"run1","hypothesisId":"A-B-C","location":"cag_source.py:get_job_detail","message":"non-HRP algolia raw keys+sample","data":{"object_id":object_id,"keys":list(raw.keys()),"job_url_field":raw.get("job_url"),"url_field":raw.get("url"),"apply_url":raw.get("apply_url"),"application_url":raw.get("application_url")},"timestamp":int(_time.time()*1000)}
-            with open("debug-25caa1.log","a") as _f: _f.write(json.dumps(_log)+"\n")
-        # #endregion
 
         # For non-HRP jobs fall back to any URL field in the Algolia response
         if not job_url:

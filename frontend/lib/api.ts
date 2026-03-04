@@ -1,5 +1,6 @@
 import axios from 'axios'
 import type { Profile, Match, Job, DiscoverStats, MatchMode } from './types'
+import { supabase } from './supabase'
 
 export type { Profile, Match, Job, DiscoverStats, MatchMode }
 
@@ -8,6 +9,17 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 export const api = axios.create({
   baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
+})
+
+// Attach the Supabase JWT (if present) to every outgoing request.
+// When auth is disabled on the backend the header is simply ignored.
+api.interceptors.request.use(async (config) => {
+  const { data } = await supabase.auth.getSession()
+  const token = data.session?.access_token
+  if (token) {
+    config.headers['Authorization'] = `Bearer ${token}`
+  }
+  return config
 })
 
 // Jobs API
@@ -29,6 +41,23 @@ export const profileApi = {
 
   processResume: async () => {
     const response = await api.post('/api/profile/process-resume')
+    return response.data
+  },
+
+  uploadResume: async (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    // Get token for manual FormData request
+    const { data } = await supabase.auth.getSession()
+    const token = data.session?.access_token
+
+    const response = await axios.post(`${API_BASE_URL}/api/profile/upload-resume`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    })
     return response.data
   },
 

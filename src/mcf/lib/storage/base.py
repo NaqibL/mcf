@@ -22,46 +22,52 @@ class RunStats:
 
 
 class Storage(ABC):
-    """Abstract storage interface for incremental crawl state."""
+    """Abstract storage interface.
+
+    Both DuckDBStore (local) and PostgresStore (hosted) implement this interface,
+    allowing the entire application to switch backends via a single DATABASE_URL
+    environment variable without touching any other code.
+    """
+
+    # === Crawl runs ===
 
     @abstractmethod
-    def begin_run(self, *, kind: str, categories: Sequence[str] | None) -> RunStats:
-        """Begin a new crawl run."""
-        pass
+    def begin_run(self, *, kind: str, categories: Sequence[str] | None) -> RunStats: ...
 
     @abstractmethod
     def finish_run(
         self, run_id: str, *, total_seen: int, added: int, maintained: int, removed: int
-    ) -> None:
-        """Finish a crawl run with statistics."""
-        pass
+    ) -> None: ...
 
     @abstractmethod
-    def existing_job_uuids(self) -> set[str]:
-        """Get set of all existing job UUIDs."""
-        pass
+    def get_recent_runs(self, limit: int = 10) -> list[dict]: ...
+
+    # === Job lifecycle ===
 
     @abstractmethod
-    def active_job_uuids(self) -> set[str]:
-        """Get set of all active job UUIDs."""
-        pass
+    def existing_job_uuids(self) -> set[str]: ...
+
+    @abstractmethod
+    def active_job_uuids(self) -> set[str]: ...
+
+    @abstractmethod
+    def active_job_uuids_for_source(self, job_source: str) -> set[str]: ...
 
     @abstractmethod
     def record_statuses(
-        self, run_id: str, *, added: Iterable[str], maintained: Iterable[str], removed: Iterable[str]
-    ) -> None:
-        """Record job statuses for a run."""
-        pass
+        self,
+        run_id: str,
+        *,
+        added: Iterable[str],
+        maintained: Iterable[str],
+        removed: Iterable[str],
+    ) -> None: ...
 
     @abstractmethod
-    def touch_jobs(self, *, run_id: str, job_uuids: Iterable[str]) -> None:
-        """Update last_seen timestamp for maintained jobs."""
-        pass
+    def touch_jobs(self, *, run_id: str, job_uuids: Iterable[str]) -> None: ...
 
     @abstractmethod
-    def deactivate_jobs(self, *, run_id: str, job_uuids: Iterable[str]) -> None:
-        """Deactivate jobs that were removed."""
-        pass
+    def deactivate_jobs(self, *, run_id: str, job_uuids: Iterable[str]) -> None: ...
 
     @abstractmethod
     def upsert_new_job_detail(
@@ -74,34 +80,143 @@ class Storage(ABC):
         location: str | None,
         job_url: str | None,
         job_source: str = "mcf",
+        skills: list[str] | None = None,
         raw_json: dict | None = None,
-    ) -> None:
-        """Insert or update a job detail."""
-        pass
+    ) -> None: ...
 
     @abstractmethod
-    def get_job(self, job_uuid: str) -> dict | None:
-        """Get job by UUID."""
-        pass
+    def get_job(self, job_uuid: str) -> dict | None: ...
 
     @abstractmethod
     def search_jobs(
-        self, *, limit: int = 100, offset: int = 0, category: str | None = None, keywords: str | None = None
-    ) -> list[dict]:
-        """Search jobs with filters."""
-        pass
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        category: str | None = None,
+        keywords: str | None = None,
+    ) -> list[dict]: ...
 
     @abstractmethod
-    def get_recent_runs(self, limit: int = 10) -> list[dict]:
-        """Get recent crawl runs with statistics."""
-        pass
+    def get_active_job_count(self) -> int: ...
+
+    # === Job embeddings ===
 
     @abstractmethod
-    def get_active_job_count(self) -> int:
-        """Get count of active jobs."""
-        pass
+    def upsert_embedding(
+        self, *, job_uuid: str, model_name: str, embedding: Sequence[float]
+    ) -> None: ...
 
     @abstractmethod
-    def close(self) -> None:
-        """Close the storage connection."""
-        pass
+    def get_active_job_embeddings(self) -> list[tuple[str, str, list[float], dict]]: ...
+
+    @abstractmethod
+    def get_all_active_jobs(self) -> list[dict]: ...
+
+    @abstractmethod
+    def get_job_embeddings_for_uuids(
+        self, uuids: list[str]
+    ) -> list[tuple[str, list[float]]]: ...
+
+    @abstractmethod
+    def get_embedding_model_name(self) -> str | None: ...
+
+    # === Users ===
+
+    @abstractmethod
+    def get_user_by_id(self, user_id: str) -> dict | None: ...
+
+    @abstractmethod
+    def upsert_user(self, *, user_id: str, email: str, role: str = "candidate") -> None: ...
+
+    # === Profiles ===
+
+    @abstractmethod
+    def create_profile(
+        self,
+        *,
+        profile_id: str,
+        user_id: str,
+        raw_resume_text: str | None = None,
+        expanded_profile_json: dict | None = None,
+        skills_json: list[str] | None = None,
+        experience_json: list[dict] | None = None,
+    ) -> None: ...
+
+    @abstractmethod
+    def get_profile_by_user_id(self, user_id: str) -> dict | None: ...
+
+    @abstractmethod
+    def get_profile_by_profile_id(self, profile_id: str) -> dict | None: ...
+
+    @abstractmethod
+    def update_profile(
+        self,
+        *,
+        profile_id: str,
+        raw_resume_text: str | None = None,
+        expanded_profile_json: dict | None = None,
+        skills_json: list[str] | None = None,
+        experience_json: list[dict] | None = None,
+        resume_storage_path: str | None = None,
+    ) -> None: ...
+
+    # === Candidate embeddings ===
+
+    @abstractmethod
+    def upsert_candidate_embedding(
+        self, *, profile_id: str, model_name: str, embedding: Sequence[float]
+    ) -> None: ...
+
+    @abstractmethod
+    def get_candidate_embedding(self, profile_id: str) -> list[float] | None: ...
+
+    @abstractmethod
+    def upsert_taste_embedding(
+        self, *, profile_id: str, model_name: str, embedding: Sequence[float]
+    ) -> None: ...
+
+    @abstractmethod
+    def get_taste_embedding(self, profile_id: str) -> list[float] | None: ...
+
+    # === Interactions ===
+
+    @abstractmethod
+    def record_interaction(
+        self, *, user_id: str, job_uuid: str, interaction_type: str
+    ) -> None: ...
+
+    @abstractmethod
+    def get_interacted_jobs(self, user_id: str) -> set[str]: ...
+
+    @abstractmethod
+    def get_interested_job_uuids(self, user_id: str) -> list[str]: ...
+
+    @abstractmethod
+    def get_not_interested_job_uuids(self, user_id: str) -> list[str]: ...
+
+    # === Discover ===
+
+    @abstractmethod
+    def get_discover_jobs(self, user_id: str, limit: int = 20) -> list[dict]: ...
+
+    @abstractmethod
+    def get_discover_stats(self, user_id: str) -> dict: ...
+
+    # === Match recording ===
+
+    @abstractmethod
+    def record_match(
+        self,
+        *,
+        match_id: str,
+        profile_id: str,
+        job_uuid: str,
+        similarity_score: float,
+        match_type: str,
+    ) -> None: ...
+
+    # === Lifecycle ===
+
+    @abstractmethod
+    def close(self) -> None: ...
