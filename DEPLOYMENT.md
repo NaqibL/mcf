@@ -147,7 +147,7 @@ Railway will host your Python API.
 ### Step 2.4: Deploy and Get the API URL
 
 1. Railway will automatically deploy when you add variables (or click **"Deploy"**).
-2. Wait for the build to finish (first build may take 5–10 minutes because it downloads the AI model).
+2. Wait for the build to finish (typically 3–5 minutes). The embedding model downloads on first use, so the first request that needs it (e.g. process resume or matches) may take 30–60 seconds; later requests are fast.
 3. Go to **"Settings"** → **"Networking"** → **"Generate Domain"** (or similar).
 4. Copy the generated URL, e.g. `https://your-api-name.up.railway.app`. This is your **API URL**.
 
@@ -261,6 +261,9 @@ After deployment, verify:
 ### "401 Unauthorized" on API calls
 - User must be signed in. Ensure magic link works and `NEXT_PUBLIC_SUPABASE_*` are set in Vercel.
 - Ensure `SUPABASE_URL` is set in Railway (required for JWT verification via JWKS). If using a legacy project, set `SUPABASE_JWT_SECRET` instead.
+
+### Build times out on Railway
+- The embedding model is no longer downloaded during build (to avoid timeouts). It downloads on first use. If the build still times out, check your Railway plan: Free = 5 min, Hobby = 20 min. Consider upgrading or simplifying dependencies.
 
 ### Daily crawl fails in GitHub Actions
 - Check that `DATABASE_URL` secret is set correctly (same as Supabase connection string).
