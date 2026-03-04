@@ -1,32 +1,66 @@
 """Authentication dependency for FastAPI.
 
-When SUPABASE_JWT_SECRET is set, every request must carry a valid Supabase JWT
-in the Authorization header.  The JWT subject (``sub`` claim) becomes the
-``user_id`` threaded through every endpoint.
+When Supabase is configured (SUPABASE_JWT_SECRET or SUPABASE_URL), every request
+must carry a valid Supabase JWT in the Authorization header. The JWT subject
+(``sub`` claim) becomes the ``user_id`` threaded through every endpoint.
 
-When the secret is NOT set (local development), auth is skipped and all
-requests are attributed to ``settings.default_user_id``.
+- New JWT Signing Keys: uses JWKS from SUPABASE_URL (no secret needed).
+- Legacy: uses SUPABASE_JWT_SECRET with HS256.
+
+When neither is set (local development), auth is skipped and all requests are
+attributed to ``settings.default_user_id``.
 """
 
 from __future__ import annotations
 
-from fastapi import Depends, Header, HTTPException, status
 from typing import Optional
 
 import jwt
+from fastapi import Depends, Header, HTTPException, status
 
 from mcf.api.config import settings
+
+# JWKS client for new Supabase JWT Signing Keys (cached per process)
+_jwks_client: jwt.PyJWKClient | None = None
+
+
+def _get_jwks_client() -> jwt.PyJWKClient:
+    """Lazy-init JWKS client from SUPABASE_URL."""
+    global _jwks_client
+    if _jwks_client is None:
+        url = settings.supabase_url or ""
+        url = url.rstrip("/") + "/auth/v1/.well-known/jwks.json"
+        _jwks_client = jwt.PyJWKClient(url)
+    return _jwks_client
 
 
 def _verify_token(token: str) -> str:
     """Verify a Supabase JWT and return the user_id (sub claim)."""
     try:
-        payload = jwt.decode(
-            token,
-            settings.supabase_jwt_secret,
-            algorithms=["HS256"],
-            options={"verify_aud": False},
-        )
+        if settings.supabase_jwt_secret:
+            # Legacy: symmetric secret (HS256)
+            payload = jwt.decode(
+                token,
+                settings.supabase_jwt_secret,
+                algorithms=["HS256"],
+                options={"verify_aud": False},
+            )
+        elif settings.supabase_url:
+            # New JWT Signing Keys: JWKS (ES256, RS256, etc.)
+            jwks = _get_jwks_client()
+            key = jwks.get_signing_key_from_jwt(token)
+            payload = jwt.decode(
+                token,
+                key.key,
+                algorithms=["ES256", "RS256"],
+                options={"verify_aud": False},
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Auth not configured",
+            )
+
         user_id: str | None = payload.get("sub")
         if not user_id:
             raise HTTPException(

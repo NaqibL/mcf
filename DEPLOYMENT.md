@@ -69,21 +69,22 @@ Supabase provides the database, user authentication, and file storage.
 4. Click **"Create bucket"**.
 5. The bucket is ready. The API uses the **service_role** key to upload, which bypasses normal security checks, so no extra policies are needed for basic uploads. If you later get "upload failed" errors, you can add a policy under **Policies** → **New policy** allowing `service_role` to INSERT and UPDATE.
 
-### Step 1.5: Get Supabase API Keys and JWT Secret
+### Step 1.5: Get Supabase API Keys
 
 1. Click **"Project Settings"** (gear icon) → **"API"**.
 2. You will see:
    - **Project URL**: e.g. `https://xxxxx.supabase.co` — copy this
    - **anon public** key: long string starting with `eyJ...` — copy this
    - **service_role** key: another long string — copy this (keep it secret; never put it in frontend code)
-3. Click **"JWT Settings"** in the left menu under API.
-4. Find **"JWT Secret"** — copy this value (you need it for the API).
+
+**JWT verification (new Signing Keys system):** Supabase has migrated from the legacy JWT secret to **JWT Signing Keys**. You do **not** need to copy a JWT secret. The API verifies tokens using the public keys from Supabase’s JWKS endpoint (`https://your-project.supabase.co/auth/v1/.well-known/jwks.json`). As long as you set `SUPABASE_URL`, the API will use this automatically.
+
+**If your project still uses the legacy JWT secret** (older projects): Go to **"JWT Settings"** under API and copy the **"JWT Secret"** value. Set it as `SUPABASE_JWT_SECRET` in Railway. New projects can skip this.
 
 Save these somewhere temporarily:
 - Project URL
 - anon public key
 - service_role key
-- JWT Secret
 
 ### Step 1.6: Invite Users (Optional)
 
@@ -129,7 +130,7 @@ Railway will host your Python API.
 | `DATABASE_URL` | Your Postgres connection string | From Step 1.2 |
 | `SUPABASE_URL` | Your Supabase project URL | From Step 1.5 |
 | `SUPABASE_SERVICE_KEY` | Your service_role key | From Step 1.5 |
-| `SUPABASE_JWT_SECRET` | Your JWT Secret | From Step 1.5 |
+| `SUPABASE_JWT_SECRET` | *(Optional)* Legacy JWT secret | Only if your project has not migrated to JWT Signing Keys (see Step 1.5) |
 | `ALLOWED_ORIGINS` | `https://your-app.vercel.app` (see below) | You will add your Vercel URL here after Part 3 |
 
 3. For now, you can set `ALLOWED_ORIGINS` to `http://localhost:3000` to test locally. After you deploy the frontend (Part 3), come back and add your Vercel URL, e.g.:
@@ -259,7 +260,7 @@ After deployment, verify:
 
 ### "401 Unauthorized" on API calls
 - User must be signed in. Ensure magic link works and `NEXT_PUBLIC_SUPABASE_*` are set in Vercel.
-- Ensure `SUPABASE_JWT_SECRET` is set in Railway.
+- Ensure `SUPABASE_URL` is set in Railway (required for JWT verification via JWKS). If using a legacy project, set `SUPABASE_JWT_SECRET` instead.
 
 ### Daily crawl fails in GitHub Actions
 - Check that `DATABASE_URL` secret is set correctly (same as Supabase connection string).
@@ -279,7 +280,7 @@ After deployment, verify:
 | Supabase URL | — | `SUPABASE_URL` | `NEXT_PUBLIC_SUPABASE_URL` | — |
 | Supabase anon key | — | — | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | — |
 | Supabase service key | — | `SUPABASE_SERVICE_KEY` | — | — |
-| JWT Secret | — | `SUPABASE_JWT_SECRET` | — | — |
+| JWT Secret (legacy only) | — | `SUPABASE_JWT_SECRET` *(optional)* | — | — |
 | API URL | — | — | `NEXT_PUBLIC_API_URL` | — |
 | CORS origins | — | `ALLOWED_ORIGINS` | — | — |
 

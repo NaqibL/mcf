@@ -48,8 +48,8 @@ class Settings(BaseSettings):
 
     @property
     def auth_enabled(self) -> bool:
-        """Auth is enabled when a Supabase JWT secret is configured."""
-        return bool(self.supabase_jwt_secret)
+        """Auth is enabled when Supabase is configured (JWT secret or URL for JWKS)."""
+        return bool(self.supabase_jwt_secret or self.supabase_url)
 
     @property
     def storage_enabled(self) -> bool:
