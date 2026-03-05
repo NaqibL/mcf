@@ -2,6 +2,8 @@
 
 MyCareersFuture job crawler and matcher for Singapore - local personal use.
 
+**Deployed app?** See [USER_GUIDE.md](USER_GUIDE.md) for a simple checklist of what you need to do (Supabase, Railway, Vercel) — no coding required.
+
 ## Features
 
 - **Job Scraping**: Incremental crawling of MyCareersFuture job listings

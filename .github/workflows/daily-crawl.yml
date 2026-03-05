@@ -10,7 +10,11 @@ on:
       source:
         description: 'Job source to crawl (mcf | cag | all)'
         required: false
-        default: 'all'
+        default: 'mcf'
+      run:
+        description: 'MCF category segment 1-5 (leave empty for all). See CRAWL_RUNS.md for category list.'
+        required: false
+        default: ''
 
 jobs:
   crawl:
@@ -40,12 +44,32 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      - name: Set categories for run (1-5)
+        id: set_cats
+        run: |
+          RUN="${{ github.event.inputs.run || '' }}"
+          case "$RUN" in
+            1) CATS="Accounting / Auditing / Taxation,Admin / Secretarial,Advertising / Media,Architecture / Interior Design,Banking and Finance,Building and Construction,Consulting,Customer Service" ;;
+            2) CATS="Design,Education and Training,Engineering,Entertainment,Environment / Health,Events / Promotions,F&B,General Management,General Work" ;;
+            3) CATS="Healthcare / Pharmaceutical,Hospitality,Human Resources,Information Technology,Insurance,Legal,Logistics / Supply Chain,Manufacturing" ;;
+            4) CATS="Marketing / Public Relations,Medical / Therapy Services,Others,Personal Care / Beauty,Precision Engineering,Professional Services,Public / Civil Service,Purchasing / Merchandising,Real Estate / Property Management" ;;
+            5) CATS="Repair and Maintenance,Risk Management,Sales / Retail,Sciences / Laboratory / R&D,Security and Investigation,Social Services,Telecommunications,Travel / Tourism,Wholesale Trade" ;;
+            *) CATS="" ;;
+          esac
+          echo "categories=$CATS" >> $GITHUB_OUTPUT
+          if [ -n "$CATS" ]; then echo "Using Run $RUN of 5 category segments"; else echo "Using all categories"; fi
+
       - name: Run incremental crawl (MCF + Careers@Gov)
-        run: uv run mcf crawl-incremental --source ${{ github.event.inputs.source || 'all' }} --limit 100
+        run: |
+          SOURCE="${{ github.event.inputs.source || 'all' }}"
+          CATS="${{ steps.set_cats.outputs.categories }}"
+          if [ -n "$CATS" ]; then
+            uv run mcf crawl-incremental --source "$SOURCE" --categories "$CATS"
+          else
+            uv run mcf crawl-incremental --source "$SOURCE"
+          fi
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          # Optional: set rate limit lower to be polite
-          # Pass as CLI arg if needed: --rate-limit 2
 
       - name: Print summary
         if: always()
