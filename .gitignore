@@ -33,3 +33,11 @@ data
 resume
 
 .env
+.env.local
+.env.*.local
+
+# Debug session logs
+debug-*.log
+
+# IDE
+.cursor/

@@ -88,6 +88,8 @@ def get_current_user(authorization: Optional[str] = Header(default=None)) -> str
         return settings.default_user_id
 
     if not authorization:
+        if settings.allow_anonymous_local:
+            return settings.default_user_id
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authorization header required",

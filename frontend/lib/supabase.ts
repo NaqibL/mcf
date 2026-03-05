@@ -1,10 +1,14 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
-// When running locally without Supabase configured, the client is a no-op
-// (all auth calls will fail gracefully and the app falls back to local mode).
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// createClient throws "supabaseUrl is required" when given empty string.
+// Use placeholder when not configured so the app can run; isSupabaseConfigured
+// gates auth usage.
+export const supabase: SupabaseClient = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder-key'
+)
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)
