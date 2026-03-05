@@ -54,7 +54,6 @@ export const profileApi = {
 
     const response = await axios.post(`${API_BASE_URL}/api/profile/upload-resume`, formData, {
       headers: {
-        'Content-Type': 'multipart/form-data',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
     })
