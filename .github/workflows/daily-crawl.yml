@@ -41,7 +41,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Run incremental crawl (MCF + Careers@Gov)
-        run: uv run mcf crawl-incremental --source ${{ github.event.inputs.source || 'all' }}
+        run: uv run mcf crawl-incremental --source ${{ github.event.inputs.source || 'all' }} --limit 100
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           # Optional: set rate limit lower to be polite
