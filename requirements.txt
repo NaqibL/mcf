@@ -14,6 +14,8 @@ certifi==2026.1.4
     #   httpcore
     #   httpx
     #   requests
+cffi==2.0.0
+    # via cryptography
 charset-normalizer==3.4.4
     # via requests
 click==8.3.1
@@ -25,6 +27,8 @@ colorama==0.4.6
     #   click
     #   tqdm
     #   uvicorn
+cryptography==46.0.5
+    # via pyjwt
 duckdb==1.4.3
     # via mcf (pyproject.toml)
 fastapi==0.128.0
@@ -86,6 +90,8 @@ packaging==25.0
     #   transformers
 psycopg2-binary==2.9.11
     # via mcf (pyproject.toml)
+pycparser==3.0
+    # via cffi
 pydantic==2.12.5
     # via
     #   mcf (pyproject.toml)
