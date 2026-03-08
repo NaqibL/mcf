@@ -79,9 +79,18 @@ function App() {
           ? 'Session expired. Please sign in again.'
           : status === 403
             ? 'Access denied. Check your login.'
-            : detail || (err.message?.includes('Network') ? 'Network error. Check CORS and API URL.' : 'Upload failed. Try again.')
+            : detail ||
+              (err.message?.includes('Network') || !err.response
+                ? 'Network error. In Vercel, set NEXT_PUBLIC_API_URL to your Railway URL (e.g. https://mcf-production-5485.up.railway.app) and redeploy.'
+                : 'Upload failed. Try again.')
       toast.error(msg)
-      console.error('[Upload error]', { status, detail, message: err.message, err })
+      console.error('[Upload error]', {
+        status,
+        detail,
+        message: err.message,
+        apiUrl: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000 (fallback — set NEXT_PUBLIC_API_URL in Vercel)',
+        err,
+      })
     } finally {
       setProcessingResume(false)
     }
