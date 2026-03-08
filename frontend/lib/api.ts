@@ -57,10 +57,26 @@ export const profileApi = {
     const formData = new FormData()
     formData.append('file', file)
 
-    // Use api instance for same base URL, CORS, and token from interceptor.
-    // Axios auto-sets multipart/form-data for FormData (overrides default Content-Type).
-    const response = await api.post('/api/profile/upload-resume', formData)
-    return response.data
+    // Use fetch for FormData — axios was sending wrong Content-Type (application/x-www-form-urlencoded)
+    // which caused ERR_NETWORK. Fetch correctly sets multipart/form-data with boundary.
+    const { data } = await supabase.auth.getSession()
+    const token = data.session?.access_token
+    const headers: Record<string, string> = {}
+    if (token) headers['Authorization'] = `Bearer ${token}`
+
+    const res = await fetch(`${API_BASE_URL}/api/profile/upload-resume`, {
+      method: 'POST',
+      body: formData,
+      headers,
+      // Don't set Content-Type — browser sets multipart/form-data; boundary=...
+    })
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}))
+      throw Object.assign(new Error(errBody.detail || res.statusText), {
+        response: { status: res.status, data: errBody },
+      })
+    }
+    return res.json()
   },
 
   computeTaste: async () => {
