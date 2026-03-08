@@ -29,7 +29,7 @@ export default function DiscoverTab() {
   const loadJobs = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await matchesApi.get('resume', true, BATCH_SIZE)
+      const data = await matchesApi.get('resume', true, BATCH_SIZE, undefined, undefined, true)
       // Further filter out any jobs already rated in this session
       setJobs(data.matches)
     } catch (err: any) {
@@ -91,6 +91,21 @@ export default function DiscoverTab() {
     }
   }
 
+  const handleResetRatings = async () => {
+    if (!confirm('Reset all your ratings and taste profile? This cannot be undone.')) return
+    try {
+      const result = await profileApi.resetRatings()
+      toast.success(
+        `Reset complete: ${result.interactions_deleted} ratings, taste profile cleared.`,
+        { duration: 4000 },
+      )
+      loadJobs()
+      loadStats()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Reset failed')
+    }
+  }
+
   const interested = stats?.interested ?? 0
   const hasEnoughRatings = interested >= 3
 
@@ -114,20 +129,29 @@ export default function DiscoverTab() {
         </div>
 
         <div className="flex flex-col items-end gap-1">
-          <button
-            onClick={handleComputeTaste}
-            disabled={computing || !hasEnoughRatings}
-            title={
-              !hasEnoughRatings
-                ? `Mark at least 3 jobs as Interested first (${interested}/3)`
-                : 'Rebuild your taste profile from current ratings'
-            }
-            className="px-5 py-2 rounded-lg text-sm font-medium transition-colors
-              bg-purple-600 text-white hover:bg-purple-700
-              disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {computing ? 'Updating…' : 'Update Taste Profile'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleResetRatings}
+              className="text-xs text-gray-400 hover:text-amber-600 transition-colors"
+              title="Clear all ratings and taste profile (for testing)"
+            >
+              Reset for testing
+            </button>
+            <button
+              onClick={handleComputeTaste}
+              disabled={computing || !hasEnoughRatings}
+              title={
+                !hasEnoughRatings
+                  ? `Mark at least 3 jobs as Interested first (${interested}/3)`
+                  : 'Rebuild your taste profile from current ratings'
+              }
+              className="px-5 py-2 rounded-lg text-sm font-medium transition-colors
+                bg-purple-600 text-white hover:bg-purple-700
+                disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {computing ? 'Updating…' : 'Update Taste Profile'}
+            </button>
+          </div>
           {!hasEnoughRatings && (
             <p className="text-xs text-gray-400">
               {3 - interested} more Interested {3 - interested === 1 ? 'job' : 'jobs'} needed

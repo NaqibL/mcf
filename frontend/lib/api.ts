@@ -83,6 +83,11 @@ export const profileApi = {
     const response = await api.post('/api/profile/compute-taste')
     return response.data as { ok: boolean; interested: number; not_interested: number; rated_count: number }
   },
+
+  resetRatings: async () => {
+    const response = await api.post('/api/profile/reset-ratings')
+    return response.data as { interactions_deleted: number; taste_deleted: number; matches_deleted: number }
+  },
 }
 
 // Matches API
@@ -93,12 +98,14 @@ export const matchesApi = {
     topK = 25,
     minSimilarity?: number,
     maxDaysOld?: number,
+    excludeRatedOnly = false,
   ) => {
     const params = new URLSearchParams({
       mode,
       exclude_interacted: excludeInteracted.toString(),
       top_k: topK.toString(),
     })
+    if (excludeRatedOnly) params.append('exclude_rated_only', 'true')
     if (minSimilarity !== undefined) params.append('min_similarity', minSimilarity.toString())
     if (maxDaysOld !== undefined) params.append('max_days_old', maxDaysOld.toString())
     const response = await api.get(`/api/matches?${params}`)

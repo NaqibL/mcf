@@ -673,6 +673,34 @@ class PostgresStore(Storage):
             )
             return [r[0] for r in cur.fetchall()]
 
+    def reset_profile_ratings(self, user_id: str) -> dict:
+        """Reset job interactions and taste profile for a user (for testing)."""
+        profile = self.get_profile_by_user_id(user_id)
+        profile_id = profile["profile_id"] if profile else None
+        taste_key = f"{profile_id}:taste" if profile_id else None
+
+        with self._cur() as cur:
+            cur.execute("DELETE FROM job_interactions WHERE user_id = %s", [user_id])
+            interactions_deleted = cur.rowcount
+
+            if taste_key:
+                cur.execute("DELETE FROM candidate_embeddings WHERE profile_id = %s", [taste_key])
+                taste_deleted = cur.rowcount
+            else:
+                taste_deleted = 0
+
+            if profile_id:
+                cur.execute("DELETE FROM matches WHERE profile_id = %s", [profile_id])
+                matches_deleted = cur.rowcount
+            else:
+                matches_deleted = 0
+
+        return {
+            "interactions_deleted": interactions_deleted,
+            "taste_deleted": taste_deleted,
+            "matches_deleted": matches_deleted,
+        }
+
     # === Discover ===
 
     def get_discover_jobs(self, user_id: str, limit: int = 20) -> list[dict]:

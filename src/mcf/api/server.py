@@ -315,6 +315,14 @@ async def _upload_to_supabase(data: bytes, user_id: str, filename: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+@app.post("/api/profile/reset-ratings")
+def reset_ratings(user_id: str = Depends(get_current_user)):
+    """Reset job interactions and taste profile for the current user (for testing)."""
+    store = get_store()
+    result = store.reset_profile_ratings(user_id)
+    return result
+
+
 @app.post("/api/profile/compute-taste")
 def compute_taste(user_id: str = Depends(get_current_user)):
     """Build / refresh the taste-profile embedding from Interested/Not Interested ratings."""
@@ -337,6 +345,7 @@ def compute_taste(user_id: str = Depends(get_current_user)):
 @app.get("/api/matches")
 def get_matches(
     exclude_interacted: bool = True,
+    exclude_rated_only: bool = False,
     top_k: int = 25,
     min_similarity: float = 0.0,
     max_days_old: int | None = None,
@@ -346,6 +355,8 @@ def get_matches(
     """Get job matches for the current user.
 
     *mode* is ``resume`` (default) or ``taste``.
+    *exclude_rated_only*: when True, only exclude interested/not_interested (for Discover).
+    When False, exclude all interactions (viewed, dismissed, etc.).
     """
     store = get_store()
     if mode not in ("resume", "taste"):
@@ -383,10 +394,12 @@ def get_matches(
             max_days_old=max_days_old,
         )
     else:
+        # exclude_rated_only: only interested/not_interested (Discover). Else all interactions.
         matches = svc.match_candidate_to_jobs(
             profile_id=profile_id,
             top_k=top_k,
             exclude_interacted=exclude_interacted,
+            exclude_rated_only=exclude_rated_only,
             user_id=user_id,
             min_similarity=min_similarity,
             max_days_old=max_days_old,

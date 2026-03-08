@@ -207,6 +207,11 @@ class Storage(ABC):
     @abstractmethod
     def get_discover_stats(self, user_id: str) -> dict: ...
 
+    def reset_profile_ratings(self, user_id: str) -> dict:
+        """Reset job interactions and taste profile for a user (for testing).
+        Returns counts of deleted rows. Override in store implementations."""
+        raise NotImplementedError
+
     # === Match recording ===
 
     @abstractmethod

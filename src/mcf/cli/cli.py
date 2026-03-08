@@ -393,6 +393,33 @@ def mark_interaction(
         store.close()
 
 
+@app.command("reset-ratings")
+def reset_ratings_cli(
+    user_id: Annotated[
+        str,
+        typer.Option("--user-id", "-u", help="User ID (default: default_user)"),
+    ] = "default_user",
+    db: Annotated[
+        Optional[Path],
+        typer.Option("--db", help="DuckDB file path (default: data/mcf.duckdb)"),
+    ] = None,
+    db_url: Annotated[
+        Optional[str],
+        typer.Option("--db-url", help="PostgreSQL connection URL", envvar="DATABASE_URL"),
+    ] = None,
+) -> None:
+    """Reset job interactions and taste profile for a user (for testing)."""
+    store, _ = _open_store(db, db_url)
+    try:
+        result = store.reset_profile_ratings(user_id)
+        console.print("[bold green]Reset complete[/bold green]")
+        console.print(f"  Interactions deleted: [cyan]{result['interactions_deleted']}[/cyan]")
+        console.print(f"  Taste profile: [cyan]{result['taste_deleted']}[/cyan]")
+        console.print(f"  Match records: [cyan]{result['matches_deleted']}[/cyan]")
+    finally:
+        store.close()
+
+
 @app.command("re-embed")
 def re_embed(
     db: Annotated[

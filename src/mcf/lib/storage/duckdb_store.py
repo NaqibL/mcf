@@ -743,6 +743,40 @@ class DuckDBStore(Storage):
         ).fetchall()
         return [r[0] for r in rows]
 
+    def reset_profile_ratings(self, user_id: str) -> dict:
+        """Reset job interactions and taste profile for a user (for testing)."""
+        profile = self.get_profile_by_user_id(user_id)
+        profile_id = profile["profile_id"] if profile else None
+        taste_key = f"{profile_id}:taste" if profile_id else None
+
+        n = self._con.execute(
+            "SELECT COUNT(*) FROM job_interactions WHERE user_id = ?", [user_id]
+        ).fetchone()[0]
+        self._con.execute("DELETE FROM job_interactions WHERE user_id = ?", [user_id])
+        interactions_deleted = n
+
+        taste_deleted = 0
+        if taste_key:
+            n = self._con.execute(
+                "SELECT COUNT(*) FROM candidate_embeddings WHERE profile_id = ?", [taste_key]
+            ).fetchone()[0]
+            self._con.execute("DELETE FROM candidate_embeddings WHERE profile_id = ?", [taste_key])
+            taste_deleted = n
+
+        matches_deleted = 0
+        if profile_id:
+            n = self._con.execute(
+                "SELECT COUNT(*) FROM matches WHERE profile_id = ?", [profile_id]
+            ).fetchone()[0]
+            self._con.execute("DELETE FROM matches WHERE profile_id = ?", [profile_id])
+            matches_deleted = n
+
+        return {
+            "interactions_deleted": interactions_deleted,
+            "taste_deleted": taste_deleted,
+            "matches_deleted": matches_deleted,
+        }
+
     def get_discover_jobs(self, user_id: str, limit: int = 20) -> list[dict]:
         """Return active jobs with embeddings that the user has NOT yet rated
         (no 'interested' or 'not_interested' interaction).

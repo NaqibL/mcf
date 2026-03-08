@@ -40,6 +40,7 @@ class MatchingService:
         profile_id: str,
         top_k: int = 25,
         exclude_interacted: bool = True,
+        exclude_rated_only: bool = False,
         user_id: str | None = None,
         min_similarity: float = 0.0,
         max_days_old: int | None = None,
@@ -53,7 +54,8 @@ class MatchingService:
         Args:
             profile_id: Candidate profile ID
             top_k: Number of top matches to return
-            exclude_interacted: If True, filter out jobs user has already interacted with
+            exclude_interacted: If True, filter out jobs user has interacted with
+            exclude_rated_only: If True, only exclude interested/not_interested (for Discover)
             user_id: User ID for interaction filtering (defaults to profile's user_id)
             min_similarity: Minimum *hybrid* score threshold (0.0 to 1.0)
             max_days_old: Maximum age of job posting in days (None = no limit)
@@ -80,7 +82,12 @@ class MatchingService:
 
         interacted_jobs: set[str] = set()
         if exclude_interacted and user_id:
-            interacted_jobs = self.store.get_interacted_jobs(user_id)
+            if exclude_rated_only:
+                interacted_jobs = set(self.store.get_interested_job_uuids(user_id)) | set(
+                    self.store.get_not_interested_job_uuids(user_id)
+                )
+            else:
+                interacted_jobs = self.store.get_interacted_jobs(user_id)
 
         candidate_vec = np.array(candidate_emb, dtype=np.float32)
         # tuple: (hybrid_score, semantic_score, skills_score, job_uuid, title, last_seen_at, job_details)
