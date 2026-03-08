@@ -31,12 +31,38 @@ class PostgresStore(Storage):
         self._url = database_url
         self._con = psycopg2.connect(database_url)
         self._con.autocommit = True
+        self._job_emb_select: str | None = None  # cached: "e.embedding_json" or "e.embedding::text"
+        self._job_emb_has_vector: bool | None = None  # cached: True if embedding column exists
 
     def close(self) -> None:
         self._con.close()
 
     def _cur(self) -> psycopg2.extensions.cursor:
         return self._con.cursor()
+
+    def _job_embedding_schema(self) -> tuple[str, bool]:
+        """Return (select_expr, has_vector) for job_embeddings.
+        select_expr: "e.embedding_json" or "e.embedding::text" for SELECT.
+        has_vector: True if embedding column exists (for vector search).
+        """
+        if self._job_emb_select is not None and self._job_emb_has_vector is not None:
+            return (self._job_emb_select, self._job_emb_has_vector)
+        with self._cur() as cur:
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'job_embeddings' AND column_name IN ('embedding_json', 'embedding')"
+            )
+            cols = {r[0] for r in cur.fetchall()}
+        has_json = "embedding_json" in cols
+        has_vec = "embedding" in cols
+        if has_json:
+            self._job_emb_select = "e.embedding_json"
+        elif has_vec:
+            self._job_emb_select = "e.embedding::text"
+        else:
+            raise RuntimeError("job_embeddings has neither embedding_json nor embedding column")
+        self._job_emb_has_vector = has_vec
+        return (self._job_emb_select, self._job_emb_has_vector)
 
     # === Crawl runs ===
 
@@ -310,14 +336,21 @@ class PostgresStore(Storage):
         query_embedding: Sequence[float] | None = None,
         limit: int | None = None,
     ) -> list[tuple[str, str, list[float], dict]]:
-        # Use pgvector similarity search when query_embedding and limit provided
-        if query_embedding is not None and limit is not None and limit > 0:
+        emb_select, has_vector = self._job_embedding_schema()
+
+        # Use pgvector similarity search when query_embedding, limit, and vector column exist
+        if (
+            query_embedding is not None
+            and limit is not None
+            and limit > 0
+            and has_vector
+        ):
             emb_str = json.dumps([float(x) for x in query_embedding])
             try:
                 with self._cur() as cur:
                     cur.execute(
-                        """
-                        SELECT j.job_uuid, j.title, e.embedding_json,
+                        f"""
+                        SELECT j.job_uuid, j.title, {emb_select},
                                j.company_name, j.location, j.job_url,
                                j.first_seen_at, j.last_seen_at, j.skills_json
                           FROM jobs j
@@ -348,8 +381,8 @@ class PostgresStore(Storage):
         # Full scan (no vector search or pgvector not migrated)
         with self._cur() as cur:
             cur.execute(
-                """
-                SELECT j.job_uuid, j.title, e.embedding_json,
+                f"""
+                SELECT j.job_uuid, j.title, {emb_select},
                        j.company_name, j.location, j.job_url,
                        j.first_seen_at, j.last_seen_at, j.skills_json
                   FROM jobs j
@@ -389,9 +422,11 @@ class PostgresStore(Storage):
     ) -> list[tuple[str, list[float]]]:
         if not uuids:
             return []
+        emb_select, _ = self._job_embedding_schema()
+        col = emb_select.replace("e.", "")  # "embedding_json" or "embedding::text"
         with self._cur() as cur:
             cur.execute(
-                "SELECT job_uuid, embedding_json FROM job_embeddings WHERE job_uuid = ANY(%s)",
+                f"SELECT job_uuid, {col} FROM job_embeddings WHERE job_uuid = ANY(%s)",
                 [uuids],
             )
             rows = cur.fetchall()
