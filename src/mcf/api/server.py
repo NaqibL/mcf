@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -51,25 +52,34 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Job Matcher API", version="0.1.0", lifespan=lifespan)
 
 
+def _add_cors_if_missing(response, request: Request) -> None:
+    """Add CORS headers to response when missing (e.g. on 500 errors)."""
+    origin = request.headers.get("origin")
+    if not origin or origin not in settings.cors_origins:
+        return
+    existing = {h.lower() for h in response.headers}
+    if "access-control-allow-origin" not in existing:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+
+
 class CORSEnforcementMiddleware(BaseHTTPMiddleware):
     """Ensure CORS headers on all responses when request has Origin.
 
-    FastAPI's CORSMiddleware can omit headers on some error paths. This safety net
-    ensures credentialed requests (e.g. upload with Authorization) get proper
-    Access-Control-Allow-Origin so the browser doesn't block with 'missing Allow Origin'.
+    FastAPI's CORSMiddleware can omit headers on 500 and other error paths. This
+    safety net ensures the browser doesn't block with 'missing Allow Origin'.
     """
 
     async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        origin = request.headers.get("origin")
-        if not origin:
-            return response
-        allowed = settings.cors_origins
-        if origin in allowed and "access-control-allow-origin" not in {
-            h.lower() for h in response.headers
-        }:
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            from starlette.responses import JSONResponse
+
+            status = exc.status_code if isinstance(exc, HTTPException) else 500
+            detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            response = JSONResponse(status_code=status, content={"detail": detail})
+        _add_cors_if_missing(response, request)
         return response
 
 
@@ -230,6 +240,7 @@ async def upload_resume(
         result["storage_path"] = storage_path
         return result
     except Exception as e:
+        logging.exception("upload_resume failed")
         raise HTTPException(status_code=500, detail=f"Failed to process resume: {e}")
 
 
