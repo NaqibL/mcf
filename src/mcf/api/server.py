@@ -9,6 +9,8 @@ from pathlib import Path
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 from mcf.api.auth import get_current_user
 from mcf.api.config import settings
@@ -48,12 +50,38 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Job Matcher API", version="0.1.0", lifespan=lifespan)
 
+
+class CORSEnforcementMiddleware(BaseHTTPMiddleware):
+    """Ensure CORS headers on all responses when request has Origin.
+
+    FastAPI's CORSMiddleware can omit headers on some error paths. This safety net
+    ensures credentialed requests (e.g. upload with Authorization) get proper
+    Access-Control-Allow-Origin so the browser doesn't block with 'missing Allow Origin'.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        origin = request.headers.get("origin")
+        if not origin:
+            return response
+        allowed = settings.cors_origins
+        if origin in allowed and "access-control-allow-origin" not in {
+            h.lower() for h in response.headers
+        }:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
+
+
+# CORSEnforcement runs first (outermost); CORSMiddleware handles preflight and normal CORS
+app.add_middleware(CORSEnforcementMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 
@@ -365,3 +393,20 @@ def get_matches(
 def health():
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+@app.get("/api/cors-check")
+def cors_check(request: Request):
+    """Debug: returns request origin and whether it's in ALLOWED_ORIGINS.
+
+    Use this to verify CORS is configured correctly when upload fails with
+    'CORS missing Allow Origin'. Call from the browser console:
+    fetch('https://your-api.railway.app/api/cors-check').then(r=>r.json()).then(console.log)
+    """
+    origin = request.headers.get("origin", "(none)")
+    allowed = settings.cors_origins
+    return {
+        "request_origin": origin,
+        "allowed_origins": allowed,
+        "origin_allowed": origin in allowed,
+    }

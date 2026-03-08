@@ -197,8 +197,12 @@ Use this to confirm everything is set up correctly.
 ### "Invalid login credentials" or wrong password
 - **Fix:** Ensure the user has the correct password. If they forgot it, reset via Supabase Dashboard → Authentication → Users → select user → Send password recovery (or create a new password). Note: password recovery sends an email; if you want zero email, create a new password in the dashboard and share it with the user.
 
-### "CORS error" or "Missing Allow Origin"
-- **Fix:** In Railway, set `ALLOWED_ORIGINS` to your exact Vercel URL: `https://mcf-kappa.vercel.app` (no `*`, no trailing slash, no quotes).
+### "CORS error" or "Missing Allow Origin" (especially on resume upload with auth)
+- **Why:** With auth enabled, the upload request sends an `Authorization` header, which triggers a CORS preflight. The API must respond with `Access-Control-Allow-Origin` matching your frontend origin exactly.
+- **Fix:** In Railway, set `ALLOWED_ORIGINS` to your exact Vercel URL: `https://mcf-kappa.vercel.app` (no `*`, no trailing slash, no quotes). For local dev with auth, include `http://localhost:3000`.
+- **Verify:** Open your deployed app, then in the browser console run:
+  `fetch('https://your-api.railway.app/api/cors-check').then(r=>r.json()).then(console.log)`
+  Check that `request_origin` matches your frontend URL and `origin_allowed` is `true`.
 
 ### Login fails or redirects to wrong page
 - **Fix:** Check Site URL and Redirect URLs in Supabase (Part 1.2). They must match your Vercel URL exactly.

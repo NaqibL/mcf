@@ -601,15 +601,36 @@ def export_to_postgres(
         # 4. job_embeddings (batch - can be large)
         rows = duck_con.execute("SELECT job_uuid, model_name, embedding_json, dim, embedded_at FROM job_embeddings").fetchall()
         if rows:
+            # Detect target schema: embedding_json, embedding (vector), or both
+            with pg_cur() as cur:
+                cur.execute(
+                    "SELECT column_name FROM information_schema.columns WHERE table_name = 'job_embeddings' AND column_name IN ('embedding_json', 'embedding')"
+                )
+                cols = {r[0] for r in cur.fetchall()}
+            has_json = "embedding_json" in cols
+            has_vector = "embedding" in cols
+
+            if has_json and has_vector:
+                insert_sql = "INSERT INTO job_embeddings(job_uuid, model_name, embedding_json, embedding, dim, embedded_at) VALUES %s ON CONFLICT (job_uuid) DO NOTHING"
+                template = "(%s, %s, %s, %s::vector, %s, %s)"
+                batch_rows = [(r[0], r[1], r[2], r[2], r[3], r[4]) for r in rows]  # emb_json used for both
+            elif has_json:
+                insert_sql = "INSERT INTO job_embeddings(job_uuid, model_name, embedding_json, dim, embedded_at) VALUES %s ON CONFLICT (job_uuid) DO NOTHING"
+                template = None
+                batch_rows = rows
+            elif has_vector:
+                insert_sql = "INSERT INTO job_embeddings(job_uuid, model_name, embedding, dim, embedded_at) VALUES %s ON CONFLICT (job_uuid) DO NOTHING"
+                template = "(%s, %s, %s::vector, %s, %s)"
+                batch_rows = rows
+            else:
+                console.print("[bold red]Error:[/bold red] job_embeddings has neither embedding_json nor embedding column. Run scripts/schema.sql first.")
+                raise typer.Exit(1)
+
             batch_size = 1000
             with pg_cur() as cur:
-                for i in range(0, len(rows), batch_size):
-                    batch = rows[i : i + batch_size]
-                    execute_values(
-                        cur,
-                        "INSERT INTO job_embeddings(job_uuid, model_name, embedding_json, dim, embedded_at) VALUES %s ON CONFLICT (job_uuid) DO NOTHING",
-                        batch,
-                    )
+                for i in range(0, len(batch_rows), batch_size):
+                    batch = batch_rows[i : i + batch_size]
+                    execute_values(cur, insert_sql, batch, template=template if template else None)
             console.print(f"[green]job_embeddings:[/green] {len(rows):,} rows")
         else:
             console.print("[yellow]job_embeddings:[/yellow] empty")

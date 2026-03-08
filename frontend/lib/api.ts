@@ -19,6 +19,10 @@ api.interceptors.request.use(async (config) => {
   if (token) {
     config.headers['Authorization'] = `Bearer ${token}`
   }
+  // FormData needs multipart/form-data with boundary — let the browser set it
+  if (config.data instanceof FormData) {
+    delete config.headers['Content-Type']
+  }
   return config
 })
 
@@ -48,15 +52,9 @@ export const profileApi = {
     const formData = new FormData()
     formData.append('file', file)
 
-    // Get token for manual FormData request
-    const { data } = await supabase.auth.getSession()
-    const token = data.session?.access_token
-
-    const response = await axios.post(`${API_BASE_URL}/api/profile/upload-resume`, formData, {
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    })
+    // Use api instance for same base URL, CORS, and token from interceptor.
+    // Axios auto-sets multipart/form-data for FormData (overrides default Content-Type).
+    const response = await api.post('/api/profile/upload-resume', formData)
     return response.data
   },
 
