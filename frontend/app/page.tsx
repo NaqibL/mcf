@@ -72,7 +72,16 @@ function App() {
       setProfile(updated)
       toast.success('Resume uploaded and processed!')
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || 'Upload failed. Try again.')
+      const status = err.response?.status
+      const detail = err.response?.data?.detail
+      const msg =
+        status === 401
+          ? 'Session expired. Please sign in again.'
+          : status === 403
+            ? 'Access denied. Check your login.'
+            : detail || (err.message?.includes('Network') ? 'Network error. Check CORS and API URL.' : 'Upload failed. Try again.')
+      toast.error(msg)
+      console.error('[Upload error]', { status, detail, message: err.message, err })
     } finally {
       setProcessingResume(false)
     }
