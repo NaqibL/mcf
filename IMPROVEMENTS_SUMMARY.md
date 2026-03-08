@@ -1,5 +1,7 @@
 # MCF Improvements Summary
 
+> **Historical changelog** — see [PROJECT_STATUS.md](PROJECT_STATUS.md) for current status.
+
 ## Overview
 All planned improvements have been successfully implemented, fixing critical bugs and adding significant performance and UX enhancements.
 

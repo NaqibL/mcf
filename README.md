@@ -177,10 +177,12 @@ mcf mark-interaction <job-uuid> --type dismissed
 mcf mark-interaction <job-uuid> --type saved
 ```
 
-**Full crawl to parquet (for one-time exports):**
+**Local crawl then export to Supabase:**
 ```bash
-mcf crawl --output data/jobs
+uv run mcf crawl-incremental --db data/mcf.duckdb --source cag
+uv run mcf export-to-postgres --db data/mcf.duckdb --db-url $DATABASE_URL
 ```
+See [scripts/LOCAL_CRAWL_WORKFLOW.md](scripts/LOCAL_CRAWL_WORKFLOW.md) for the full workflow.
 
 ### API Endpoints
 
@@ -205,7 +207,7 @@ mcf crawl --output data/jobs
 - **Backend**: FastAPI (Python)
 - **Frontend**: Next.js 14 (React, TypeScript)
 - **Database**: DuckDB (local) **or** PostgreSQL / Supabase (hosted)
-- **Auth**: Supabase magic-link (optional — local dev works without it)
+- **Auth**: Supabase email+password (optional — local dev works without it)
 - **Storage**: Only stores embeddings + basic info + URLs (no full descriptions)
 
 ## Configuration
@@ -239,11 +241,11 @@ This stack runs for ~$5/month using free-tier services plus Railway Hobby.
 
 1. **Create a Supabase project** at [supabase.com](https://supabase.com)
    - Run `scripts/schema.sql` in the SQL editor
-   - Copy the Postgres connection string, JWT secret, URL, and service key
+   - Copy the Postgres connection string, URL, and service key (see USER_GUIDE for auth setup)
 
 2. **Deploy the API to Railway**
    - Connect your GitHub repo, select `Dockerfile.api`
-   - Set environment variables: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_JWT_SECRET`, `ALLOWED_ORIGINS`
+   - Set environment variables: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `ALLOWED_ORIGINS`
 
 3. **Deploy the frontend to Vercel**
    - Set `NEXT_PUBLIC_API_URL` to your Railway API URL
@@ -253,9 +255,8 @@ This stack runs for ~$5/month using free-tier services plus Railway Hobby.
    - In your repo settings → Secrets, add `DATABASE_URL` (same Supabase Postgres URL)
    - The daily crawl will run at 02:00 UTC every day
 
-5. **Invite users**
-   - In Supabase Dashboard → Authentication → Users, invite users by email
-   - They receive a magic link and sign in — no password needed
+5. **Add users**
+   - Users can self-signup (email+password) or you create them in Supabase Dashboard. See [USER_GUIDE.md](USER_GUIDE.md) Part 5.
 
 ## Development Guide
 

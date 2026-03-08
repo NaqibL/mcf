@@ -61,6 +61,7 @@ A detailed rundown of what is implemented vs. what was discussed but not yet don
 | `mcf match-jobs` | Done | CLI matching |
 | `mcf mark-interaction` | Done | DuckDB only (no `--db-url`) |
 | `mcf re-embed` | Done | Batch re-embed all jobs |
+| `mcf export-to-postgres` | Done | Export DuckDB crawl data to Supabase |
 
 ### Infrastructure
 | Component | Status | Notes |
@@ -68,7 +69,8 @@ A detailed rundown of what is implemented vs. what was discussed but not yet don
 | Supabase (DB, Auth, Storage) | Done | |
 | Railway API | Done | `Dockerfile.api` |
 | Vercel frontend | Done | Root: `frontend` |
-| Schema | Done | `scripts/schema.sql` — JSON embeddings, no pgvector |
+| Schema | Done | `scripts/schema.sql` — JSON embeddings; pgvector optional via `scripts/migrations/001_add_pgvector.sql` |
+| DuckDB → Postgres export | Done | `mcf export-to-postgres` — bulk upload crawl data to Supabase |
 
 ---
 
@@ -86,16 +88,13 @@ A detailed rundown of what is implemented vs. what was discussed but not yet don
 
 | Item | Source | Description |
 |------|--------|-------------|
-| **DuckDB → Postgres export** | Local crawl plan | No `mcf export-to-postgres` command. Would allow: crawl to DuckDB locally, then bulk upload to Supabase. |
 | **`--skip-embeddings` for crawl** | Local crawl plan | Crawl job details only; run `mcf re-embed` separately. Useful for crawl without GPU, embed later. |
-| **`mcf crawl --output` (parquet)** | README | README mentions `mcf crawl --output data/jobs` for full crawl to parquet. No such command exists; only `crawl-incremental`. |
 | **`mark-interaction` with Postgres** | CLI | `mark-interaction` uses DuckDB only; no `--db-url` support. |
 
 ### Lower Priority / Docs
 
 | Item | Source | Description |
 |------|--------|-------------|
-| **scripts/query_db.py** | SETUP.md | Referenced in SETUP (Neon) but file does not exist. |
 | **USER_GUIDE language** | USER_GUIDE | Refers to "the developer" as separate from reader; you are both. Could be rewritten in first person. |
 
 ---
@@ -118,12 +117,12 @@ A detailed rundown of what is implemented vs. what was discussed but not yet don
 
 ### Phase 2 — Performance (Done)
 3. ~~**pgvector migration**~~ — Done. Run `scripts/migrations/001_add_pgvector.sql` in Supabase. PostgresStore uses vector search when available.
-4. **Local crawl workflow** — Document or implement: run crawl locally with `DATABASE_URL`, optionally in 5 category runs. Or add `mcf export-to-postgres` if you prefer DuckDB-first.
+4. **Local crawl workflow** — Done. See `scripts/LOCAL_CRAWL_WORKFLOW.md`. Use `mcf export-to-postgres` to bulk upload DuckDB → Supabase.
 
 ### Phase 3 — Polish
 5. **USER_GUIDE cleanup** — Remove "developer will" language; make Part 4 conditional on pgvector existing.
 6. **`mark-interaction` --db-url** — Add Postgres support for CLI parity.
-7. **`scripts/query_db.py`** — Add if you use Neon or want a query helper.
+7. **`scripts/query_db.py`** — Optional query helper; not present. Use Supabase SQL Editor or psql instead.
 
 ---
 

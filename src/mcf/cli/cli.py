@@ -510,6 +510,117 @@ def re_embed(
         store.close()
 
 
+@app.command("export-to-postgres")
+def export_to_postgres(
+    db: Annotated[
+        Optional[Path],
+        typer.Option("--db", help="DuckDB file path (default: data/mcf.duckdb)"),
+    ] = None,
+    db_url: Annotated[
+        str,
+        typer.Option("--db-url", help="PostgreSQL connection URL", envvar="DATABASE_URL"),
+    ] = "",
+) -> None:
+    """Export job data from DuckDB to PostgreSQL (Supabase).
+
+    Use after a local crawl: crawl to DuckDB, then run this to upload.
+    Exports: crawl_runs, jobs, job_run_status, job_embeddings.
+    User data (profiles, interactions) is not exported.
+    """
+    if not db_url:
+        console.print("[bold red]Error:[/bold red] --db-url or DATABASE_URL is required")
+        raise typer.Exit(1)
+
+    db_path = db or Path("data/mcf.duckdb")
+    if not db_path.exists():
+        console.print(f"[bold red]Error:[/bold red] DuckDB not found at {db_path}")
+        console.print(f"Run 'mcf crawl-incremental --db {db_path}' first.")
+        raise typer.Exit(1)
+
+    import duckdb
+    from psycopg2.extras import execute_values
+
+    duck_con = duckdb.connect(str(db_path), read_only=True)
+    pg_con = __import__("psycopg2").connect(db_url)
+    pg_con.autocommit = True
+
+    def pg_cur():
+        return pg_con.cursor()
+
+    try:
+        # 1. crawl_runs
+        rows = duck_con.execute("SELECT run_id, started_at, finished_at, kind, categories_json, total_seen, added, maintained, removed FROM crawl_runs").fetchall()
+        if rows:
+            with pg_cur() as cur:
+                execute_values(
+                    cur,
+                    """
+                    INSERT INTO crawl_runs(run_id, started_at, finished_at, kind, categories_json, total_seen, added, maintained, removed)
+                    VALUES %s ON CONFLICT (run_id) DO NOTHING
+                    """,
+                    rows,
+                )
+            console.print(f"[green]crawl_runs:[/green] {len(rows):,} rows")
+        else:
+            console.print("[yellow]crawl_runs:[/yellow] empty")
+
+        # 2. jobs
+        rows = duck_con.execute(
+            "SELECT job_uuid, job_source, first_seen_run_id, last_seen_run_id, is_active, first_seen_at, last_seen_at, title, company_name, location, job_url, skills_json FROM jobs"
+        ).fetchall()
+        if rows:
+            with pg_cur() as cur:
+                execute_values(
+                    cur,
+                    """
+                    INSERT INTO jobs(job_uuid, job_source, first_seen_run_id, last_seen_run_id, is_active, first_seen_at, last_seen_at, title, company_name, location, job_url, skills_json)
+                    VALUES %s ON CONFLICT (job_uuid) DO NOTHING
+                    """,
+                    rows,
+                )
+            console.print(f"[green]jobs:[/green] {len(rows):,} rows")
+        else:
+            console.print("[yellow]jobs:[/yellow] empty")
+
+        # 3. job_run_status (batch to avoid huge INSERT)
+        rows = duck_con.execute("SELECT run_id, job_uuid, status FROM job_run_status").fetchall()
+        if rows:
+            batch_size = 5000
+            with pg_cur() as cur:
+                for i in range(0, len(rows), batch_size):
+                    batch = rows[i : i + batch_size]
+                    execute_values(
+                        cur,
+                        "INSERT INTO job_run_status(run_id, job_uuid, status) VALUES %s ON CONFLICT (run_id, job_uuid) DO NOTHING",
+                        batch,
+                    )
+            console.print(f"[green]job_run_status:[/green] {len(rows):,} rows")
+        else:
+            console.print("[yellow]job_run_status:[/yellow] empty")
+
+        # 4. job_embeddings (batch - can be large)
+        rows = duck_con.execute("SELECT job_uuid, model_name, embedding_json, dim, embedded_at FROM job_embeddings").fetchall()
+        if rows:
+            batch_size = 1000
+            with pg_cur() as cur:
+                for i in range(0, len(rows), batch_size):
+                    batch = rows[i : i + batch_size]
+                    execute_values(
+                        cur,
+                        "INSERT INTO job_embeddings(job_uuid, model_name, embedding_json, dim, embedded_at) VALUES %s ON CONFLICT (job_uuid) DO NOTHING",
+                        batch,
+                    )
+            console.print(f"[green]job_embeddings:[/green] {len(rows):,} rows")
+        else:
+            console.print("[yellow]job_embeddings:[/yellow] empty")
+
+        console.print()
+        console.print("[bold green]Export complete![/bold green]")
+    finally:
+        duck_con.close()
+        pg_con.close()
+
+
 def main() -> None:
     """Main entry point."""
     app()

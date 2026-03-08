@@ -1,5 +1,8 @@
 version: '3.8'
 
+# For full config see .env.example; override with .env.
+# Key vars: DATABASE_URL, SUPABASE_URL, SUPABASE_SERVICE_KEY, ALLOWED_ORIGINS, RESUME_PATH
+
 services:
   api:
     build:
@@ -8,13 +11,14 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
-      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
+      - DATABASE_URL=${DATABASE_URL:-}
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY:-}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
+      - RESUME_PATH=${RESUME_PATH:-resume/resume.pdf}
     volumes:
       - ./data:/app/data
+      - ./resume:/app/resume
     restart: unless-stopped
 
   frontend:

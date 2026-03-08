@@ -88,15 +88,13 @@ Save these somewhere temporarily:
 - anon public key
 - service_role key
 
-### Step 1.6: Invite Users (Optional)
+### Step 1.6: Configure Auth (Optional)
 
-To let people sign in with magic link:
+The app uses email+password sign-in. Configure in **Authentication** → **Providers** → **Email**:
+- Enable Email provider
+- Turn OFF "Confirm email" so users can sign in immediately (no verification link)
 
-1. Go to **"Authentication"** → **"Users"** in the left sidebar.
-2. Click **"Add user"** → **"Create new user"**.
-3. Enter the email address of the person you want to invite.
-4. They will receive an email to set their password, or you can use magic link (depending on your Auth settings).
-5. For magic link: go to **Authentication** → **Providers** → **Email** and ensure "Enable Email provider" is on.
+Users can self-signup from the app, or you can create them: **Authentication** → **Users** → **Add user** → **Create new user** (enter email and password, share the password with them).
 
 ---
 
@@ -245,7 +243,7 @@ After deployment, verify:
 
 - [ ] Supabase: Tables exist, `resumes` bucket exists, Auth is enabled
 - [ ] Railway: API deploys, health check works (visit `https://your-api.up.railway.app/docs`)
-- [ ] Vercel: Frontend loads, you can sign in with magic link
+- [ ] Vercel: Frontend loads, you can sign in with email+password
 - [ ] GitHub: `DATABASE_URL` secret is set, manual workflow run succeeds
 - [ ] End-to-end: Sign in → upload resume → see job matches
 
@@ -261,7 +259,7 @@ After deployment, verify:
 - Check that `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are correct in Railway.
 
 ### "401 Unauthorized" on API calls
-- User must be signed in. Ensure magic link works and `NEXT_PUBLIC_SUPABASE_*` are set in Vercel.
+- User must be signed in. Ensure email+password auth works and `NEXT_PUBLIC_SUPABASE_*` are set in Vercel.
 - Ensure `SUPABASE_URL` is set in Railway (required for JWT verification via JWKS). If using a legacy project, set `SUPABASE_JWT_SECRET` instead.
 
 ### Build times out on Railway
