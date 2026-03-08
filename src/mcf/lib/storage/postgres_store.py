@@ -270,21 +270,82 @@ class PostgresStore(Storage):
     ) -> None:
         now = _utcnow()
         emb_list = [float(x) for x in embedding]
+        emb_str = json.dumps(emb_list)
         with self._cur() as cur:
-            cur.execute(
-                """
-                INSERT INTO job_embeddings(job_uuid, model_name, embedding_json, dim, embedded_at)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (job_uuid) DO UPDATE SET
-                  model_name     = EXCLUDED.model_name,
-                  embedding_json = EXCLUDED.embedding_json,
-                  dim            = EXCLUDED.dim,
-                  embedded_at    = EXCLUDED.embedded_at
-                """,
-                [job_uuid, model_name, json.dumps(emb_list), len(emb_list), now],
-            )
+            # Try with pgvector column first (after 001_add_pgvector migration)
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO job_embeddings(job_uuid, model_name, embedding_json, embedding, dim, embedded_at)
+                    VALUES (%s, %s, %s, %s::vector, %s, %s)
+                    ON CONFLICT (job_uuid) DO UPDATE SET
+                      model_name     = EXCLUDED.model_name,
+                      embedding_json = EXCLUDED.embedding_json,
+                      embedding      = EXCLUDED.embedding,
+                      dim            = EXCLUDED.dim,
+                      embedded_at    = EXCLUDED.embedded_at
+                    """,
+                    [job_uuid, model_name, emb_str, emb_str, len(emb_list), now],
+                )
+            except psycopg2.ProgrammingError as e:
+                if "embedding" in str(e) or "column" in str(e).lower():
+                    # pgvector migration not run yet — use json only
+                    cur.execute(
+                        """
+                        INSERT INTO job_embeddings(job_uuid, model_name, embedding_json, dim, embedded_at)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (job_uuid) DO UPDATE SET
+                          model_name     = EXCLUDED.model_name,
+                          embedding_json = EXCLUDED.embedding_json,
+                          dim            = EXCLUDED.dim,
+                          embedded_at    = EXCLUDED.embedded_at
+                        """,
+                        [job_uuid, model_name, emb_str, len(emb_list), now],
+                    )
+                else:
+                    raise
 
-    def get_active_job_embeddings(self) -> list[tuple[str, str, list[float], dict]]:
+    def get_active_job_embeddings(
+        self,
+        query_embedding: Sequence[float] | None = None,
+        limit: int | None = None,
+    ) -> list[tuple[str, str, list[float], dict]]:
+        # Use pgvector similarity search when query_embedding and limit provided
+        if query_embedding is not None and limit is not None and limit > 0:
+            emb_str = json.dumps([float(x) for x in query_embedding])
+            try:
+                with self._cur() as cur:
+                    cur.execute(
+                        """
+                        SELECT j.job_uuid, j.title, e.embedding_json,
+                               j.company_name, j.location, j.job_url,
+                               j.first_seen_at, j.last_seen_at, j.skills_json
+                          FROM jobs j
+                          JOIN job_embeddings e ON e.job_uuid = j.job_uuid
+                         WHERE j.is_active = TRUE
+                           AND e.embedding IS NOT NULL
+                         ORDER BY e.embedding <=> %s::vector ASC
+                         LIMIT %s
+                        """,
+                        [emb_str, limit],
+                    )
+                    rows = cur.fetchall()
+                out: list[tuple[str, str, list[float], dict]] = []
+                for uuid, title, emb_json, company_name, location, job_url, first_seen_at, last_seen_at, skills_json in rows:
+                    job_details = {
+                        "company_name": company_name,
+                        "location": location,
+                        "job_url": job_url,
+                        "first_seen_at": first_seen_at,
+                        "last_seen_at": last_seen_at,
+                        "skills": json.loads(skills_json) if skills_json else [],
+                    }
+                    out.append((uuid, title or "", json.loads(emb_json), job_details))
+                return out
+            except psycopg2.ProgrammingError:
+                pass  # Fall through to full scan
+
+        # Full scan (no vector search or pgvector not migrated)
         with self._cur() as cur:
             cur.execute(
                 """
@@ -297,7 +358,7 @@ class PostgresStore(Storage):
                 """
             )
             rows = cur.fetchall()
-        out: list[tuple[str, str, list[float], dict]] = []
+        out = []
         for uuid, title, emb_json, company_name, location, job_url, first_seen_at, last_seen_at, skills_json in rows:
             job_details = {
                 "company_name": company_name,

@@ -62,7 +62,11 @@ class MatchingService:
         if not candidate_emb:
             return []
 
-        job_embeddings = self.store.get_active_job_embeddings()
+        # Pass candidate embedding + limit for pgvector fast path (Postgres only)
+        vector_limit = min(500, top_k * 10)
+        job_embeddings = self.store.get_active_job_embeddings(
+            query_embedding=candidate_emb, limit=vector_limit
+        )
         if not job_embeddings:
             return []
 
@@ -230,7 +234,10 @@ class MatchingService:
         if not taste_emb:
             return []
 
-        job_embeddings = self.store.get_active_job_embeddings()
+        vector_limit = min(500, top_k * 10)
+        job_embeddings = self.store.get_active_job_embeddings(
+            query_embedding=taste_emb, limit=vector_limit
+        )
         if not job_embeddings:
             return []
 

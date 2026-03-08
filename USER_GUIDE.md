@@ -1,4 +1,4 @@
-# Job Matcher — Your Setup & Operations Guide
+ # Job Matcher — Your Setup & Operations Guide
 
 This guide explains **what you need to do yourself** (no coding) vs **what the app does automatically**. Steps marked **YOU DO THIS** require you to log in to a dashboard or change a setting. Everything else is handled by the code.
 
@@ -8,52 +8,35 @@ This guide explains **what you need to do yourself** (no coding) vs **what the a
 
 | Task | Who | Where |
 |------|-----|-------|
-| Set up Custom SMTP for magic links | **You** | Supabase Dashboard |
+| Enable simple email+password auth | **You** | Supabase Dashboard |
 | Set Site URL and Redirect URLs | **You** | Supabase Dashboard |
 | Add environment variables | **You** | Railway, Vercel |
 | Run database migrations (pgvector) | **You** | Supabase SQL Editor |
-| Invite users | **You** | Supabase Dashboard |
+| Add users (optional) | **You** | Supabase Dashboard or self-signup |
 | Auth, matching, resume processing | **The app** | Automatic |
 | Daily job crawl | **GitHub Actions** | Automatic |
 
+**No email services needed.** The app uses simple email+password login. No magic links, no Resend, no SMTP. Each user’s taste profile and resume are stored in Supabase and linked to their account.
+
 ---
 
-## Part 1: Fix Magic Link & Login Issues
+## Part 1: Simple Login (Email + Password)
 
-### Problem
-- Magic links expire too quickly
-- "Email rate limit exceeded" — can't log in again for an hour
-- Login fails if you leave the page and come back
+The app uses **email + password** authentication. No magic links, no external email services (Resend, SMTP, etc.). Each login assigns the person’s taste profile and stores their resume in Supabase.
 
-### Solution: Configure Supabase (All **YOU DO THIS**)
-
-#### Step 1.1: Set Up Custom SMTP (Bypass Rate Limits)
-
-Supabase's built-in email has a strict limit (~4 emails per hour). Using your own SMTP provider removes this limit.
+### Step 1.1: Configure Supabase Auth (**YOU DO THIS**)
 
 1. Go to [Supabase Dashboard](https://supabase.com/dashboard) → select your project
 2. Click **Authentication** (left sidebar) → **Providers** → **Email**
-3. Scroll down to **SMTP Settings**
-4. Turn on **Enable Custom SMTP**
-5. Sign up for a free account at [Resend](https://resend.com) (3,000 emails/month free)
-6. In Resend: **API Keys** → Create API Key → copy it
-7. In Resend: **Domains** → add your domain (or use their test domain for development)
-8. Back in Supabase SMTP Settings, fill in:
-   - **Host:** `smtp.resend.com`
-   - **Port:** `465`
-   - **Username:** `resend` (literal)
-   - **Password:** your Resend API key
-   - **Sender email:** the verified email from Resend (e.g. `onboarding@resend.dev` for testing)
-   - **Sender name:** `Job Matcher` (or any name)
-9. Click **Save**
+3. Ensure **Enable Email provider** is ON
+4. Turn **OFF** “Confirm email” — this lets users sign in immediately without clicking a verification link
+5. Click **Save**
 
-**Result:** Magic links will be sent through Resend instead of Supabase. No more 4/hour limit.
+**Result:** Users can sign up and sign in with email + password. No emails are sent. No Resend or SMTP needed.
 
 ---
 
-#### Step 1.2: Set Site URL and Redirect URLs
-
-If these are wrong, clicking the magic link sends you to the wrong page and login fails.
+### Step 1.2: Set Site URL and Redirect URLs
 
 1. In Supabase: **Authentication** → **URL Configuration**
 2. Set **Site URL** to your exact Vercel URL:
@@ -68,11 +51,9 @@ If these are wrong, clicking the magic link sends you to the wrong page and logi
    The `**` means "any path on this domain". Add one per line if you have multiple URLs.
 4. Click **Save**
 
-**Result:** After clicking the magic link, you'll be sent back to your app and stay logged in.
-
 ---
 
-#### Step 1.3: (Optional) Extend JWT Expiry
+### Step 1.3: (Optional) Extend JWT Expiry
 
 If sessions expire too quickly (e.g. you get logged out after 1 hour):
 
@@ -128,7 +109,7 @@ These must be set correctly for the app to work. **YOU DO THIS** in each service
 
 | Feature | What Happens |
 |---------|--------------|
-| **Login** | User enters email → magic link sent (via your SMTP) → user clicks link → redirected to app → session stored in browser |
+| **Login** | User enters email + password → session stored in browser. No email sent. Taste profile and resume are linked to their account. |
 | **Resume upload** | User uploads PDF/DOCX → app extracts text → creates profile → computes embedding → stores in Supabase Storage |
 | **Job matches** | App loads your resume embedding, compares to all job embeddings, returns top matches |
 | **Discover tab** | Shows top resume matches; you rate them to build a "taste" profile |
@@ -141,17 +122,17 @@ These must be set correctly for the app to work. **YOU DO THIS** in each service
 
 When the developer implements the revamp plan, some steps will require **YOU** to run SQL or redeploy.
 
-### 4.1 pgvector Migration (When Implemented)
+### 4.1 pgvector Migration (Optional but Recommended)
 
-**YOU DO THIS** once when the migration is added:
+**YOU DO THIS** once to speed up job matching:
 
 1. In Supabase: **SQL Editor** → **New query**
-2. The developer will add a file like `scripts/migrations/001_add_pgvector.sql`
-3. Copy the contents of that file and paste into the SQL Editor
+2. Open `scripts/migrations/001_add_pgvector.sql` from this project
+3. Copy the contents and paste into the SQL Editor
 4. Click **Run**
 5. You should see "Success" — the database now supports fast vector search
 
-**Result:** Job loading becomes much faster.
+**Result:** Job matching becomes much faster (especially with many jobs). The app works without this migration but will fall back to a slower full scan.
 
 ---
 
@@ -167,16 +148,19 @@ When code is pushed to GitHub:
 
 ---
 
-## Part 5: Inviting Users (Multi-User)
+## Part 5: Adding Users (Multi-User)
 
-**YOU DO THIS** to let others use the app:
+**Option A — Self-signup (simplest):** Users go to the app and click “Sign up”. They enter email + password and are in immediately. No admin action needed.
+
+**Option B — Admin creates users:** If you prefer to control who can access:
 
 1. In Supabase: **Authentication** → **Users**
 2. Click **Add user** → **Create new user**
-3. Enter their email address
-4. They will receive an invite (or you can use magic link — they request it from the app)
+3. Enter their email and a temporary password
+4. Share the password with them (e.g. in person or via a secure channel)
+5. They sign in with email + password on the login page
 
-**Note:** With "Create new user", Supabase may send a password-set email. For magic-link-only flow, ensure **Authentication** → **Providers** → **Email** has "Enable Email provider" on, and users can request a magic link from the login page.
+**Note:** With “Confirm email” turned OFF (Part 1.1), no verification emails are sent. No Resend or SMTP needed.
 
 ---
 
@@ -185,7 +169,7 @@ When code is pushed to GitHub:
 Use this to confirm everything is set up correctly.
 
 ### Supabase
-- [ ] Custom SMTP is enabled and tested (send a magic link)
+- [ ] Email provider enabled, “Confirm email” OFF (Part 1.1)
 - [ ] Site URL = `https://mcf-kappa.vercel.app` (or your URL)
 - [ ] Redirect URLs include `https://mcf-kappa.vercel.app/**`
 - [ ] `resumes` storage bucket exists
@@ -199,7 +183,7 @@ Use this to confirm everything is set up correctly.
 ### Vercel
 - [ ] All variables set (see Part 2)
 - [ ] Frontend loads at your Vercel URL
-- [ ] You can sign in with magic link
+- [ ] You can sign in with email + password
 - [ ] After login, you can upload a resume and see matches
 
 ### GitHub
@@ -210,13 +194,13 @@ Use this to confirm everything is set up correctly.
 
 ## Part 7: Troubleshooting
 
-### "Email rate limit exceeded"
-- **Fix:** Set up Custom SMTP (Part 1.1). The built-in Supabase email has a strict limit.
+### "Invalid login credentials" or wrong password
+- **Fix:** Ensure the user has the correct password. If they forgot it, reset via Supabase Dashboard → Authentication → Users → select user → Send password recovery (or create a new password). Note: password recovery sends an email; if you want zero email, create a new password in the dashboard and share it with the user.
 
 ### "CORS error" or "Missing Allow Origin"
 - **Fix:** In Railway, set `ALLOWED_ORIGINS` to your exact Vercel URL: `https://mcf-kappa.vercel.app` (no `*`, no trailing slash, no quotes).
 
-### Magic link sends me to wrong page / login fails after clicking
+### Login fails or redirects to wrong page
 - **Fix:** Check Site URL and Redirect URLs in Supabase (Part 1.2). They must match your Vercel URL exactly.
 
 ### "401 Unauthorized" on API calls
@@ -226,22 +210,34 @@ Use this to confirm everything is set up correctly.
 - **Fix:** This is a known issue. The pgvector migration (Part 4.1) will speed it up once implemented. The first request after a deploy may also be slow (30–60 seconds) while the embedding model loads.
 
 ### "Re-process" button fails / 404
-- **Fix:** This is a bug in production. The Re-process flow will be fixed in the revamp. For now, use "Replace" to upload a new resume instead.
+- **Fix:** Re-process now fetches from Supabase Storage when the local file is missing. Ensure you have uploaded a resume at least once, and that Supabase Storage is configured (`SUPABASE_URL` + `SUPABASE_SERVICE_KEY` in Railway).
 
 ---
 
-## Part 8: Implementation Status
+## Part 8: Code Changes (Already Done)
+
+The following code changes have been made to support simple email+password login:
+
+| Change | File | What it does |
+|--------|------|--------------|
+| Auth form | `frontend/app/components/AuthGate.tsx` | Replaced magic-link flow with email+password sign-in and sign-up. Users can create an account or sign in directly. |
+
+No backend changes were needed. The API already uses Supabase JWTs; it does not care whether the user signed in via magic link or password.
+
+---
+
+## Part 9: Implementation Status
 
 As the revamp plan is implemented, check this table to see what's done and what still needs your action.
 
 | Item | Your Action Required? | Status |
 |------|------------------------|--------|
-| Custom SMTP | Yes — Part 1.1 | Pending |
+| Email+password auth (Confirm email OFF) | Yes — Part 1.1 | Pending |
 | Site URL + Redirect URLs | Yes — Part 1.2 | Pending |
 | JWT expiry (optional) | Yes — Part 1.3 | Pending |
 | Environment variables | Yes — Part 2 | Verify |
 | pgvector migration | Yes — Part 4.1 (when file exists) | Pending |
-| Invite users | Yes — Part 5 | As needed |
+| Add users | Yes — Part 5 (as needed) | As needed |
 
 ---
 

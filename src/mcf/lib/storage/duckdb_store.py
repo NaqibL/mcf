@@ -360,9 +360,14 @@ class DuckDBStore(Storage):
             [job_uuid, model_name, json.dumps(emb_list), len(emb_list), now],
         )
 
-    def get_active_job_embeddings(self) -> list[tuple[str, str, list[float], dict]]:
+    def get_active_job_embeddings(
+        self,
+        query_embedding: Sequence[float] | None = None,
+        limit: int | None = None,
+    ) -> list[tuple[str, str, list[float], dict]]:
         """Get active job embeddings with all job details in a single query.
 
+        query_embedding and limit are ignored (DuckDB has no vector search).
         Returns:
             List of tuples: (job_uuid, title, embedding, job_details_dict)
             where job_details_dict contains: company_name, location, job_url,

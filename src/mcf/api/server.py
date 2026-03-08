@@ -125,19 +125,45 @@ def get_profile(user_id: str = Depends(get_current_user)):
 
 
 @app.post("/api/profile/process-resume")
-def process_resume(user_id: str = Depends(get_current_user)):
-    """Process resume from the configured file path and create/update profile."""
+async def process_resume(user_id: str = Depends(get_current_user)):
+    """Process resume from local file or Supabase Storage.
+
+    Tries local file first (dev). If not found and profile has resume_storage_path,
+    fetches from Supabase Storage and processes that. Fixes Re-process in production.
+    """
     store = get_store()
     resume_path = Path(settings.resume_path)
-    if not resume_path.exists():
+
+    if resume_path.exists():
+        try:
+            resume_text = extract_resume_text(resume_path)
+            return _process_resume_text(store, user_id, resume_text)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to process resume: {e}")
+
+    # Local file missing — try Supabase Storage
+    profile = store.get_profile_by_user_id(user_id)
+    if not profile or not profile.get("resume_storage_path"):
         raise HTTPException(
-            status_code=404, detail=f"Resume file not found at {resume_path}"
+            status_code=404,
+            detail="No resume found. Upload a resume first, or ensure the file exists at the configured path.",
         )
+
+    storage_path = profile["resume_storage_path"]
+    if not settings.storage_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="Resume is in cloud storage but Supabase Storage is not configured.",
+        )
+
     try:
-        resume_text = extract_resume_text(resume_path)
+        data = await _download_from_supabase(storage_path)
+        resume_text = extract_resume_text(data)
         return _process_resume_text(store, user_id, resume_text)
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to process resume: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to process resume from storage: {e}")
 
 
 @app.post("/api/profile/upload-resume")
@@ -209,6 +235,20 @@ def _process_resume_text(
         embedding=embedding,
     )
     return {"status": "ok", "profile_id": profile_id, "message": "Resume processed successfully"}
+
+
+async def _download_from_supabase(storage_path: str) -> bytes:
+    """Download file bytes from Supabase Storage. storage_path is e.g. resumes/{user_id}/resume.pdf."""
+    url = f"{settings.supabase_url}/storage/v1/object/{storage_path}"
+    headers = {"Authorization": f"Bearer {settings.supabase_service_key}"}
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url, headers=headers, timeout=30.0)
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch resume from storage: {resp.status_code} {resp.text[:200]}",
+            )
+    return resp.content
 
 
 async def _upload_to_supabase(data: bytes, user_id: str, filename: str) -> str:
