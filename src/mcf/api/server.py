@@ -358,6 +358,19 @@ def get_matches(
     *exclude_rated_only*: when True, only exclude interested/not_interested (for Discover).
     When False, exclude all interactions (viewed, dismissed, etc.).
     """
+    # #region agent log
+    import json as _json
+    _dbg = {"sessionId":"65c0a8","hypothesisId":"H2,H4","location":"server.py:get_matches","message":"API params received","data":{"top_k":top_k,"exclude_rated_only":exclude_rated_only,"max_days_old":max_days_old,"mode":mode},"timestamp":__import__("time").time()*1000}
+    try:
+        _log = str(Path.cwd() / "debug-65c0a8.log")
+        with open(_log, "a") as f:
+            f.write(_json.dumps(_dbg) + "\n")
+    except Exception:
+        try:
+            httpx.post("http://127.0.0.1:7243/ingest/9319c197-5f30-450d-9bb3-de2a905787b1", json=_dbg, headers={"Content-Type":"application/json","X-Debug-Session-Id":"65c0a8"}, timeout=0.3)
+        except Exception:
+            print("[DEBUG65c0a8]", _json.dumps(_dbg), flush=True)
+    # #endregion
     store = get_store()
     if mode not in ("resume", "taste"):
         raise HTTPException(status_code=400, detail="mode must be 'resume' or 'taste'")

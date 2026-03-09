@@ -111,6 +111,9 @@ export const matchesApi = {
     if (maxDaysOld != null && !Number.isNaN(maxDaysOld) && maxDaysOld > 0) {
       params.append('max_days_old', maxDaysOld.toString())
     }
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/9319c197-5f30-450d-9bb3-de2a905787b1',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'65c0a8'},body:JSON.stringify({sessionId:'65c0a8',location:'api.ts:matchesApi.get',message:'Frontend params sent',data:{topK,minSimilarity,maxDaysOld,excludeRatedOnly,urlParams:params.toString()},timestamp:Date.now(),hypothesisId:'H2,H4'})}).catch(()=>{});
+    // #endregion
     const response = await api.get(`/api/matches?${params}`)
     return response.data as { matches: Match[]; total: number; mode: MatchMode }
   },

@@ -68,10 +68,10 @@ class MatchingService:
             return []
 
         # Pass candidate embedding + limit for pgvector fast path (Postgres only).
-        # Use a large pool (up to 10000) so matches keep coming as users rate more jobs.
-        # Formula: ensure we have enough candidates after excluding rated (e.g. 500+ rated
-        # still leaves 9500 to choose from).
-        vector_limit = min(10000, max(2000, top_k * 100))
+        # Use a large pool (up to 60000) so matches keep coming as users rate more jobs.
+        # With ~60k jobs, a 10k cap left most of the nearest jobs rated → ~23 results.
+        # Formula: ensure we have enough candidates after excluding rated.
+        vector_limit = min(60000, max(2000, top_k * 100))
         job_embeddings = self.store.get_active_job_embeddings(
             query_embedding=candidate_emb, limit=vector_limit
         )
@@ -93,6 +93,22 @@ class MatchingService:
                 )
             else:
                 interacted_jobs = self.store.get_interacted_jobs(user_id)
+
+        # #region agent log
+        import json as _json
+        from pathlib import Path as _Path
+        _dbg1 = {"sessionId":"65c0a8","hypothesisId":"H1,H3","location":"matching_service.py","message":"Vector pool and rated counts","data":{"vector_limit":vector_limit,"job_embeddings_count":len(job_embeddings),"interacted_jobs_count":len(interacted_jobs),"exclude_rated_only":exclude_rated_only,"top_k":top_k},"timestamp":__import__("time").time()*1000}
+        try:
+            _log = str(_Path.cwd() / "debug-65c0a8.log")
+            with open(_log, "a") as f:
+                f.write(_json.dumps(_dbg1) + "\n")
+        except Exception:
+            try:
+                import httpx
+                httpx.post("http://127.0.0.1:7243/ingest/9319c197-5f30-450d-9bb3-de2a905787b1", json=_dbg1, headers={"Content-Type":"application/json","X-Debug-Session-Id":"65c0a8"}, timeout=0.3)
+            except Exception:
+                print("[DEBUG65c0a8]", _json.dumps(_dbg1), flush=True)
+        # #endregion
 
         candidate_vec = np.array(candidate_emb, dtype=np.float32)
         scored: list[tuple[float, str, str, datetime | None, dict]] = []
@@ -136,6 +152,22 @@ class MatchingService:
 
         scored.sort(reverse=True, key=sort_key)
         top_matches = scored[:top_k]
+
+        # #region agent log
+        import json as _json2
+        from pathlib import Path as _Path2
+        _dbg2 = {"sessionId":"65c0a8","hypothesisId":"H1,H3","location":"matching_service.py","message":"After filtering","data":{"scored_count":len(scored),"top_matches_count":len(top_matches),"max_days_old":max_days_old},"timestamp":__import__("time").time()*1000}
+        try:
+            _log = str(_Path2.cwd() / "debug-65c0a8.log")
+            with open(_log, "a") as f:
+                f.write(_json2.dumps(_dbg2) + "\n")
+        except Exception:
+            try:
+                import httpx
+                httpx.post("http://127.0.0.1:7243/ingest/9319c197-5f30-450d-9bb3-de2a905787b1", json=_dbg2, headers={"Content-Type":"application/json","X-Debug-Session-Id":"65c0a8"}, timeout=0.3)
+            except Exception:
+                print("[DEBUG65c0a8]", _json2.dumps(_dbg2), flush=True)
+        # #endregion
 
         results = []
         for combined_score, semantic_score, job_uuid, title, _, job_details in top_matches:
@@ -244,7 +276,7 @@ class MatchingService:
         if not taste_emb:
             return []
 
-        vector_limit = min(10000, max(2000, top_k * 100))
+        vector_limit = min(60000, max(2000, top_k * 100))
         job_embeddings = self.store.get_active_job_embeddings(
             query_embedding=taste_emb, limit=vector_limit
         )
