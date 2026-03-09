@@ -268,19 +268,18 @@ export default function ResumeTab() {
             />
           ))}
 
-          <div className="text-center pt-2 flex justify-center gap-3">
-            {hasMore && (
-              <button
-                onClick={() => loadJobs(true, jobs.length)}
-                disabled={loadingMore}
-                className="px-6 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium
-                  hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed
-                  flex items-center gap-2"
-              >
-                {loadingMore && <Spinner size="sm" variant="light" />}
-                {loadingMore ? 'Loading…' : 'Load more'}
-              </button>
-            )}
+          <div className="text-center pt-2 flex flex-wrap justify-center gap-3">
+            <button
+              onClick={() => loadJobs(true, jobs.length)}
+              disabled={loadingMore || !hasMore}
+              className="px-6 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium
+                hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed
+                flex items-center gap-2 disabled:hover:bg-blue-600"
+              title={!hasMore ? 'No more matches available' : 'Load next 25 jobs'}
+            >
+              {loadingMore && <Spinner size="sm" variant="light" />}
+              {loadingMore ? 'Loading…' : hasMore ? 'Load more' : 'No more matches'}
+            </button>
             <button
               onClick={() => loadJobs(false)}
               className="px-6 py-2.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium
