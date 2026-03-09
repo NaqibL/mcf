@@ -247,7 +247,7 @@ export default function ResumeTab() {
             or lower your filters above.
           </p>
           <button
-            onClick={loadJobs}
+            onClick={() => loadJobs(false)}
             className="mt-4 px-5 py-2 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
           >
             Refresh
