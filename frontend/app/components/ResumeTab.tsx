@@ -7,10 +7,10 @@ import { MatchCard } from './JobCard'
 import Spinner from './Spinner'
 import toast from 'react-hot-toast'
 
-const BATCH_SIZE = 30
+// Show all unrated jobs by default — no arbitrary cap on a rating feed
+const DEFAULT_TOP_K = 500
 
 interface Filters {
-  topK: number
   minSimilarity: number
   maxDaysOld: number | null
 }
@@ -21,7 +21,7 @@ export default function ResumeTab() {
   const [loading, setLoading] = useState(true)
   const [computing, setComputing] = useState(false)
   const [ratingUuids, setRatingUuids] = useState<Set<string>>(new Set())
-  const [filters, setFilters] = useState<Filters>({ topK: BATCH_SIZE, minSimilarity: 0, maxDaysOld: null })
+  const [filters, setFilters] = useState<Filters>({ minSimilarity: 0, maxDaysOld: null })
 
   const loadStats = useCallback(async () => {
     try {
@@ -38,7 +38,7 @@ export default function ResumeTab() {
       const data = await matchesApi.get(
         'resume',
         true,
-        filters.topK,
+        DEFAULT_TOP_K,
         filters.minSimilarity / 100,
         filters.maxDaysOld ?? undefined,
       )
@@ -48,7 +48,7 @@ export default function ResumeTab() {
     } finally {
       setLoading(false)
     }
-  }, [filters.topK, filters.minSimilarity, filters.maxDaysOld])
+  }, [filters.minSimilarity, filters.maxDaysOld])
 
   useEffect(() => {
     loadJobs()
@@ -172,14 +172,14 @@ export default function ResumeTab() {
 
       {/* Hint */}
       <p className="text-sm text-gray-500 px-1">
-        These are your top resume matches — rate each one to train your taste profile. Once you have
+        All unrated resume matches are shown below — rate each one to train your taste profile. Once you have
         enough ratings, click <strong>Update Taste Profile</strong> then use the <strong>Taste</strong> tab
         for personalised recommendations.
       </p>
 
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">
               Min Match: <span className="text-blue-600 font-bold">{filters.minSimilarity}%</span>
@@ -203,20 +203,6 @@ export default function ResumeTab() {
               value={filters.maxDaysOld ?? ''}
               onChange={(e) =>
                 setFilters({ ...filters, maxDaysOld: e.target.value ? parseInt(e.target.value) : null })
-              }
-              className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm
-                focus:outline-none focus:ring-2 focus:ring-blue-400"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Results</label>
-            <input
-              type="number"
-              min={1}
-              max={100}
-              value={filters.topK}
-              onChange={(e) =>
-                setFilters({ ...filters, topK: parseInt(e.target.value) || BATCH_SIZE })
               }
               className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm
                 focus:outline-none focus:ring-2 focus:ring-blue-400"
@@ -248,6 +234,9 @@ export default function ResumeTab() {
         </div>
       ) : (
         <div className="space-y-4">
+          <p className="text-sm text-gray-400 px-1">
+            Showing <strong className="text-gray-600">{jobs.length}</strong> unrated {jobs.length === 1 ? 'job' : 'jobs'}
+          </p>
           {jobs.map((job) => (
             <MatchCard
               key={job.job_uuid}
@@ -264,7 +253,7 @@ export default function ResumeTab() {
               className="px-6 py-2.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium
                 hover:bg-gray-200 transition-colors"
             >
-              Refresh matches
+              Refresh
             </button>
           </div>
         </div>

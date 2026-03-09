@@ -10,11 +10,10 @@ import numpy as np
 
 from mcf.lib.storage.base import Storage
 
-# Weights for the hybrid score: semantic similarity + skills keyword overlap.
-# Semantic embedding captures overall role alignment; skills overlap is a light
-# signal (reduced from 0.35 to avoid penalizing jobs with noisy/sparse skills).
-_SEMANTIC_WEIGHT = 0.9
-_SKILLS_WEIGHT = 0.1
+# Pure semantic matching — skills keyword overlap removed.
+# Skills data is too noisy and inconsistently populated to be a reliable signal.
+_SEMANTIC_WEIGHT = 1.0
+_SKILLS_WEIGHT = 0.0
 
 
 class MatchingService:
@@ -45,11 +44,10 @@ class MatchingService:
         min_similarity: float = 0.0,
         max_days_old: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Find top matching jobs for a candidate using a hybrid score.
+        """Find top matching jobs for a candidate using semantic similarity.
 
-        The final score is a weighted combination of:
-          • semantic similarity  (embedding dot-product, 90 %)
-          • skills keyword overlap  (job skills found in resume text, 10 %)
+        Score is cosine similarity between the resume embedding and each job embedding
+        (both L2-normalised, so dot-product == cosine similarity).
 
         Args:
             profile_id: Candidate profile ID
@@ -57,7 +55,7 @@ class MatchingService:
             exclude_interacted: If True, filter out jobs user has interacted with
             exclude_rated_only: If True, only exclude interested/not_interested (for Discover)
             user_id: User ID for interaction filtering (defaults to profile's user_id)
-            min_similarity: Minimum *hybrid* score threshold (0.0 to 1.0)
+            min_similarity: Minimum similarity threshold (0.0 to 1.0)
             max_days_old: Maximum age of job posting in days (None = no limit)
         """
         candidate_emb = self.store.get_candidate_embedding(profile_id)
@@ -75,9 +73,8 @@ class MatchingService:
         if not job_embeddings:
             return []
 
-        # Load the candidate profile once to get resume text for skills matching
+        # Load the candidate profile to resolve user_id for interaction filtering
         profile = self.store.get_profile_by_profile_id(profile_id)
-        resume_text_lower = (profile.get("raw_resume_text") or "").lower() if profile else ""
 
         # Resolve user_id for interaction filtering
         if exclude_interacted and user_id is None and profile:
@@ -93,8 +90,7 @@ class MatchingService:
                 interacted_jobs = self.store.get_interacted_jobs(user_id)
 
         candidate_vec = np.array(candidate_emb, dtype=np.float32)
-        # tuple: (hybrid_score, semantic_score, skills_score, job_uuid, title, last_seen_at, job_details)
-        scored: list[tuple[float, float, float, str, str, datetime | None, dict]] = []
+        scored: list[tuple[float, str, str, datetime | None, dict]] = []
 
         for job_uuid, title, job_emb, job_details in job_embeddings:
             if exclude_interacted and job_uuid in interacted_jobs:
@@ -102,18 +98,11 @@ class MatchingService:
 
             # Semantic similarity (cosine – embeddings are L2-normalised)
             job_vec = np.array(job_emb, dtype=np.float32)
-            semantic_score = float(np.dot(candidate_vec, job_vec))
-
-            # Skills keyword overlap
-            job_skills: list[str] = job_details.get("skills") or []
-            skills_score = self._skills_overlap_score(job_skills, resume_text_lower)
-
-            # Hybrid score
-            hybrid_score = _SEMANTIC_WEIGHT * semantic_score + _SKILLS_WEIGHT * skills_score
+            score = float(np.dot(candidate_vec, job_vec))
 
             # At threshold 0, allow all scores including negative (cosine can be negative)
             effective_min = min_similarity if min_similarity > 0 else -1.0
-            if hybrid_score < effective_min:
+            if score < effective_min:
                 continue
 
             last_seen_at = job_details.get("last_seen_at")
@@ -123,25 +112,25 @@ class MatchingService:
                 if (datetime.now(timezone.utc) - last_seen_at).days > max_days_old:
                     continue
 
-            scored.append((hybrid_score, semantic_score, skills_score, job_uuid, title, last_seen_at, job_details))
+            scored.append((score, job_uuid, title, last_seen_at, job_details))
 
-        # Sort: hybrid score descending, then recency descending as tie-breaker
+        # Sort: score descending, then recency descending as tie-breaker
         def sort_key(x: tuple) -> tuple:
-            hybrid, _, _, _, _, last_seen, _ = x
+            s, _, _, last_seen, _ = x
             date_for_sort = last_seen if last_seen else datetime(1970, 1, 1, tzinfo=timezone.utc)
-            return (hybrid, date_for_sort)
+            return (s, date_for_sort)
 
         scored.sort(reverse=True, key=sort_key)
         top_matches = scored[:top_k]
 
         results = []
-        for hybrid_score, semantic_score, skills_score, job_uuid, title, _, job_details in top_matches:
+        for score, job_uuid, title, _, job_details in top_matches:
             match_id = secrets.token_urlsafe(16)
             self.store.record_match(
                 match_id=match_id,
                 profile_id=profile_id,
                 job_uuid=job_uuid,
-                similarity_score=hybrid_score,
+                similarity_score=score,
                 match_type="candidate_initiated",
             )
             results.append(
@@ -151,13 +140,7 @@ class MatchingService:
                     "company_name": job_details.get("company_name"),
                     "location": job_details.get("location"),
                     "job_url": job_details.get("job_url"),
-                    "similarity_score": hybrid_score,
-                    "semantic_score": semantic_score,
-                    "skills_overlap_score": skills_score,
-                    "matched_skills": [
-                        s for s in (job_details.get("skills") or [])
-                        if s.lower() in resume_text_lower
-                    ],
+                    "similarity_score": score,
                     "job_skills": job_details.get("skills") or [],
                     "last_seen_at": job_details.get("last_seen_at"),
                 }
