@@ -1,12 +1,14 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { profileApi } from '@/lib/api'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Profile } from '@/lib/types'
 import AuthGate from './components/AuthGate'
 import ResumeTab from './components/ResumeTab'
 import TasteTab from './components/TasteTab'
+import Spinner from './components/Spinner'
 import toast, { Toaster } from 'react-hot-toast'
 
 type Tab = 'resume' | 'taste'
@@ -105,8 +107,18 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 relative">
       <Toaster position="top-right" />
+
+      {/* Loading overlay for resume processing (upload or re-process) */}
+      {processingResume && (
+        <div className="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-4">
+            <Spinner size="lg" />
+            <p className="text-gray-600 font-medium">Processing resume…</p>
+          </div>
+        </div>
+      )}
 
       {/* Hidden file input */}
       <input
@@ -120,7 +132,15 @@ function App() {
       {/* Top bar */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 flex items-center justify-between h-14">
-          <h1 className="text-xl font-bold text-gray-900 tracking-tight">Job Matcher</h1>
+          <div className="flex items-center gap-4">
+            <h1 className="text-xl font-bold text-gray-900 tracking-tight">Job Matcher</h1>
+            <Link
+              href="/how-it-works"
+              className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              How it works
+            </Link>
+          </div>
 
           {/* Resume status + upload */}
           {!loadingProfile && (

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { jobsApi, matchesApi, profileApi, discoverApi } from '@/lib/api'
 import type { Match, DiscoverStats } from '@/lib/types'
 import { MatchCard } from './JobCard'
+import Spinner from './Spinner'
 import toast from 'react-hot-toast'
 
 const BATCH_SIZE = 30
@@ -155,8 +156,9 @@ export default function ResumeTab() {
               }
               className="px-5 py-2 rounded-lg text-sm font-medium transition-colors
                 bg-purple-600 text-white hover:bg-purple-700
-                disabled:opacity-40 disabled:cursor-not-allowed"
+                disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
             >
+              {computing && <Spinner size="sm" variant="light" />}
               {computing ? 'Updating…' : 'Update Taste Profile'}
             </button>
           </div>
@@ -225,7 +227,10 @@ export default function ResumeTab() {
 
       {/* Job list */}
       {loading ? (
-        <div className="text-center py-20 text-gray-400">Finding your best matches…</div>
+        <div className="flex flex-col items-center justify-center py-20 gap-4">
+          <Spinner size="lg" />
+          <p className="text-gray-500 font-medium">Finding your best matches…</p>
+        </div>
       ) : jobs.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-xl border border-gray-200">
           <div className="text-4xl mb-3">🎉</div>

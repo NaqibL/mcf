@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { jobsApi, matchesApi, profileApi, discoverApi } from '@/lib/api'
 import type { Match, DiscoverStats } from '@/lib/types'
 import { MatchCard } from './JobCard'
+import Spinner from './Spinner'
 import toast from 'react-hot-toast'
 
 interface Filters {
@@ -119,8 +120,9 @@ export default function TasteTab() {
             }
             className="px-5 py-2 rounded-lg text-sm font-medium transition-colors
               bg-purple-600 text-white hover:bg-purple-700
-              disabled:opacity-40 disabled:cursor-not-allowed"
+              disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
           >
+            {computing && <Spinner size="sm" variant="light" />}
             {computing ? 'Updating…' : 'Update Taste Profile'}
           </button>
           {!hasEnoughRatings && (
@@ -181,9 +183,16 @@ export default function TasteTab() {
           disabled={finding || !hasEnoughRatings}
           className="w-full py-2.5 rounded-lg text-white font-medium text-sm transition-colors
             bg-purple-600 hover:bg-purple-700
-            disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
-          {finding ? 'Finding…' : 'Find Taste Matches'}
+          {finding ? (
+            <>
+              <Spinner size="sm" variant="light" />
+              Finding…
+            </>
+          ) : (
+            'Find Taste Matches'
+          )}
         </button>
       </div>
 
@@ -203,20 +212,23 @@ export default function TasteTab() {
             />
           ))}
         </div>
+      ) : finding ? (
+        <div className="flex flex-col items-center justify-center py-20 gap-4 bg-white rounded-xl border border-gray-200">
+          <Spinner size="lg" />
+          <p className="text-gray-500 font-medium">Finding taste matches…</p>
+        </div>
       ) : (
-        !finding && (
-          <div className="text-center py-16 bg-white rounded-xl border border-gray-200">
-            <div className="text-4xl mb-3">🔍</div>
-            <p className="text-gray-500">
-              Click <strong>Find Taste Matches</strong> above to search for jobs that match your taste.
+        <div className="text-center py-16 bg-white rounded-xl border border-gray-200">
+          <div className="text-4xl mb-3">🔍</div>
+          <p className="text-gray-500">
+            Click <strong>Find Taste Matches</strong> above to search for jobs that match your taste.
+          </p>
+          {!hasEnoughRatings && (
+            <p className="text-sm text-gray-400 mt-2">
+              Rate at least 3 jobs as Interested in the Resume tab first, then Update Taste Profile.
             </p>
-            {!hasEnoughRatings && (
-              <p className="text-sm text-gray-400 mt-2">
-                Rate at least 3 jobs as Interested in the Resume tab first, then Update Taste Profile.
-              </p>
-            )}
-          </div>
-        )
+          )}
+        </div>
       )}
     </div>
   )

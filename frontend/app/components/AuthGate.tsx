@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
+import Spinner from './Spinner'
 
 interface Props {
   children: (session: Session | null) => React.ReactNode
@@ -41,8 +42,9 @@ export default function AuthGate({ children }: Props) {
   // Still loading
   if (session === undefined) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-gray-400 text-sm animate-pulse">Loading…</div>
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-gray-50">
+        <Spinner size="lg" />
+        <p className="text-gray-500 text-sm">Loading…</p>
       </div>
     )
   }
@@ -74,6 +76,12 @@ export default function AuthGate({ children }: Props) {
           <p className="text-sm text-gray-500 mt-1">
             {isSignUp ? 'Create an account to get started.' : 'Sign in to access your job matches.'}
           </p>
+          <a
+            href="/how-it-works"
+            className="text-xs text-blue-600 hover:underline mt-2 inline-block"
+          >
+            How does it work? →
+          </a>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -120,9 +128,17 @@ export default function AuthGate({ children }: Props) {
             type="submit"
             disabled={loading}
             className="w-full py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium
-              hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors
+              flex items-center justify-center gap-2"
           >
-            {loading ? 'Please wait…' : isSignUp ? 'Sign up' : 'Sign in'}
+            {loading ? (
+              <>
+                <Spinner size="sm" variant="light" />
+                Please wait…
+              </>
+            ) : (
+              isSignUp ? 'Sign up' : 'Sign in'
+            )}
           </button>
         </form>
 

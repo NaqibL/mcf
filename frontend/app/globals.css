@@ -8,14 +8,6 @@
   --background-end-rgb: 255, 255, 255;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --foreground-rgb: 255, 255, 255;
-    --background-start-rgb: 0, 0, 0;
-    --background-end-rgb: 0, 0, 0;
-  }
-}
-
 body {
   color: rgb(var(--foreground-rgb));
   background: linear-gradient(
@@ -24,4 +16,17 @@ body {
       rgb(var(--background-end-rgb))
     )
     rgb(var(--background-start-rgb));
+}
+
+/* Ensure inputs always have visible text (light bg, dark text) regardless of dark mode */
+input:not([type="hidden"]):not([type="file"]),
+textarea,
+select {
+  background-color: white !important;
+  color: rgb(17, 24, 39) !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: rgb(156, 163, 175) !important;
 }
