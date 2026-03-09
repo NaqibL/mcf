@@ -295,9 +295,10 @@ def match_jobs(
         
         # Get matches
         matching_service = MatchingService(store)
-        matches = matching_service.match_candidate_to_jobs(
+        matches, _ = matching_service.match_candidate_to_jobs(
             profile_id=profile_id,
             top_k=top_k,
+            offset=0,
             exclude_interacted=exclude_interacted,
             user_id=user_id,
         )

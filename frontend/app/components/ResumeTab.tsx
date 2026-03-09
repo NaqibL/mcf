@@ -7,8 +7,7 @@ import { MatchCard } from './JobCard'
 import Spinner from './Spinner'
 import toast from 'react-hot-toast'
 
-// Show all unrated jobs by default — no arbitrary cap on a rating feed
-const DEFAULT_TOP_K = 500
+const JOBS_PER_PAGE = 25
 
 interface Filters {
   minSimilarity: number
@@ -17,8 +16,10 @@ interface Filters {
 
 export default function ResumeTab() {
   const [jobs, setJobs] = useState<Match[]>([])
+  const [hasMore, setHasMore] = useState(false)
   const [stats, setStats] = useState<DiscoverStats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [computing, setComputing] = useState(false)
   const [ratingUuids, setRatingUuids] = useState<Set<string>>(new Set())
   const [filters, setFilters] = useState<Filters>({ minSimilarity: 0, maxDaysOld: null })
@@ -32,23 +33,38 @@ export default function ResumeTab() {
     }
   }, [])
 
-  const loadJobs = useCallback(async () => {
-    setLoading(true)
-    try {
-      const data = await matchesApi.get(
-        'resume',
-        true,
-        DEFAULT_TOP_K,
-        filters.minSimilarity / 100,
-        filters.maxDaysOld ?? undefined,
-      )
-      setJobs(data.matches)
-    } catch (err: any) {
-      toast.error('Failed to load jobs. Is the API server running?')
-    } finally {
-      setLoading(false)
-    }
-  }, [filters.minSimilarity, filters.maxDaysOld])
+  const loadJobs = useCallback(
+    async (append = false, offsetOverride?: number) => {
+      if (append) {
+        setLoadingMore(true)
+      } else {
+        setLoading(true)
+      }
+      try {
+        const offset = append ? (offsetOverride ?? 0) : 0
+        const data = await matchesApi.get(
+          'resume',
+          true,
+          JOBS_PER_PAGE,
+          offset,
+          filters.minSimilarity / 100,
+          filters.maxDaysOld ?? undefined,
+        )
+        if (append) {
+          setJobs((prev) => [...prev, ...data.matches])
+        } else {
+          setJobs(data.matches)
+        }
+        setHasMore(data.has_more)
+      } catch (err: any) {
+        toast.error('Failed to load jobs. Is the API server running?')
+      } finally {
+        setLoading(false)
+        setLoadingMore(false)
+      }
+    },
+    [filters.minSimilarity, filters.maxDaysOld],
+  )
 
   useEffect(() => {
     loadJobs()
@@ -172,8 +188,8 @@ export default function ResumeTab() {
 
       {/* Hint */}
       <p className="text-sm text-gray-500 px-1">
-        All unrated resume matches are shown below — rate each one to train your taste profile. Once you have
-        enough ratings, click <strong>Update Taste Profile</strong> then use the <strong>Taste</strong> tab
+        Top unrated resume matches are shown below (25 at a time) — rate each one to train your taste profile.
+        Once you have enough ratings, click <strong>Update Taste Profile</strong> then use the <strong>Taste</strong> tab
         for personalised recommendations.
       </p>
 
@@ -252,9 +268,21 @@ export default function ResumeTab() {
             />
           ))}
 
-          <div className="text-center pt-2">
+          <div className="text-center pt-2 flex justify-center gap-3">
+            {hasMore && (
+              <button
+                onClick={() => loadJobs(true, jobs.length)}
+                disabled={loadingMore}
+                className="px-6 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium
+                  hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed
+                  flex items-center gap-2"
+              >
+                {loadingMore && <Spinner size="sm" variant="light" />}
+                {loadingMore ? 'Loading…' : 'Load more'}
+              </button>
+            )}
             <button
-              onClick={loadJobs}
+              onClick={() => loadJobs(false)}
               className="px-6 py-2.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium
                 hover:bg-gray-200 transition-colors"
             >

@@ -41,6 +41,7 @@ export default function TasteTab() {
         'taste',
         true,
         filters.topK,
+        0,
         filters.minSimilarity / 100,
         filters.maxDaysOld ?? undefined,
       )

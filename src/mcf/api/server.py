@@ -347,6 +347,7 @@ def get_matches(
     exclude_interacted: bool = True,
     exclude_rated_only: bool = False,
     top_k: int = 25,
+    offset: int = 0,
     min_similarity: float = 0.0,
     max_days_old: int | None = None,
     mode: str = "resume",
@@ -358,19 +359,6 @@ def get_matches(
     *exclude_rated_only*: when True, only exclude interested/not_interested (for Discover).
     When False, exclude all interactions (viewed, dismissed, etc.).
     """
-    # #region agent log
-    import json as _json
-    _dbg = {"sessionId":"65c0a8","hypothesisId":"H2,H4","location":"server.py:get_matches","message":"API params received","data":{"top_k":top_k,"exclude_rated_only":exclude_rated_only,"max_days_old":max_days_old,"mode":mode},"timestamp":__import__("time").time()*1000}
-    try:
-        _log = str(Path.cwd() / "debug-65c0a8.log")
-        with open(_log, "a") as f:
-            f.write(_json.dumps(_dbg) + "\n")
-    except Exception:
-        try:
-            httpx.post("http://127.0.0.1:7243/ingest/9319c197-5f30-450d-9bb3-de2a905787b1", json=_dbg, headers={"Content-Type":"application/json","X-Debug-Session-Id":"65c0a8"}, timeout=0.3)
-        except Exception:
-            print("[DEBUG65c0a8]", _json.dumps(_dbg), flush=True)
-    # #endregion
     store = get_store()
     if mode not in ("resume", "taste"):
         raise HTTPException(status_code=400, detail="mode must be 'resume' or 'taste'")
@@ -378,6 +366,8 @@ def get_matches(
         raise HTTPException(status_code=400, detail="min_similarity must be between 0.0 and 1.0")
     if max_days_old is not None and max_days_old <= 0:
         max_days_old = None  # Treat invalid/zero as no filter
+    if offset < 0:
+        offset = 0
 
     profile = store.get_profile_by_user_id(user_id)
     if not profile:
@@ -398,9 +388,10 @@ def get_matches(
                     "then click Update Taste Profile."
                 ),
             )
-        matches = svc.match_taste_to_jobs(
+        matches, total = svc.match_taste_to_jobs(
             profile_id=profile_id,
             top_k=top_k,
+            offset=offset,
             exclude_rated=exclude_interacted,
             user_id=user_id,
             min_similarity=min_similarity,
@@ -408,9 +399,10 @@ def get_matches(
         )
     else:
         # exclude_rated_only: only interested/not_interested (Discover). Else all interactions.
-        matches = svc.match_candidate_to_jobs(
+        matches, total = svc.match_candidate_to_jobs(
             profile_id=profile_id,
             top_k=top_k,
+            offset=offset,
             exclude_interacted=exclude_interacted,
             exclude_rated_only=exclude_rated_only,
             user_id=user_id,
@@ -418,7 +410,8 @@ def get_matches(
             max_days_old=max_days_old,
         )
 
-    return {"matches": matches, "total": len(matches), "mode": mode}
+    has_more = offset + len(matches) < total
+    return {"matches": matches, "total": total, "has_more": has_more, "mode": mode}
 
 
 # ---------------------------------------------------------------------------

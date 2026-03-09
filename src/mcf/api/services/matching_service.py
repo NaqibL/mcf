@@ -43,12 +43,13 @@ class MatchingService:
         self,
         profile_id: str,
         top_k: int = 25,
+        offset: int = 0,
         exclude_interacted: bool = True,
         exclude_rated_only: bool = False,
         user_id: str | None = None,
         min_similarity: float = 0.0,
         max_days_old: int | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], int]:
         """Find top matching jobs for a candidate using semantic similarity.
 
         Score is cosine similarity between the resume embedding and each job embedding
@@ -65,7 +66,7 @@ class MatchingService:
         """
         candidate_emb = self.store.get_candidate_embedding(profile_id)
         if not candidate_emb:
-            return []
+            return ([], 0)
 
         # Pass candidate embedding + limit for pgvector fast path (Postgres only).
         # Use a large pool (up to 60000) so matches keep coming as users rate more jobs.
@@ -76,7 +77,7 @@ class MatchingService:
             query_embedding=candidate_emb, limit=vector_limit
         )
         if not job_embeddings:
-            return []
+            return ([], 0)
 
         # Load the candidate profile to resolve user_id for interaction filtering
         profile = self.store.get_profile_by_profile_id(profile_id)
@@ -93,22 +94,6 @@ class MatchingService:
                 )
             else:
                 interacted_jobs = self.store.get_interacted_jobs(user_id)
-
-        # #region agent log
-        import json as _json
-        from pathlib import Path as _Path
-        _dbg1 = {"sessionId":"65c0a8","hypothesisId":"H1,H3","location":"matching_service.py","message":"Vector pool and rated counts","data":{"vector_limit":vector_limit,"job_embeddings_count":len(job_embeddings),"interacted_jobs_count":len(interacted_jobs),"exclude_rated_only":exclude_rated_only,"top_k":top_k},"timestamp":__import__("time").time()*1000}
-        try:
-            _log = str(_Path.cwd() / "debug-65c0a8.log")
-            with open(_log, "a") as f:
-                f.write(_json.dumps(_dbg1) + "\n")
-        except Exception:
-            try:
-                import httpx
-                httpx.post("http://127.0.0.1:7243/ingest/9319c197-5f30-450d-9bb3-de2a905787b1", json=_dbg1, headers={"Content-Type":"application/json","X-Debug-Session-Id":"65c0a8"}, timeout=0.3)
-            except Exception:
-                print("[DEBUG65c0a8]", _json.dumps(_dbg1), flush=True)
-        # #endregion
 
         candidate_vec = np.array(candidate_emb, dtype=np.float32)
         scored: list[tuple[float, str, str, datetime | None, dict]] = []
@@ -151,23 +136,8 @@ class MatchingService:
             return (combined, date_for_sort)
 
         scored.sort(reverse=True, key=sort_key)
-        top_matches = scored[:top_k]
-
-        # #region agent log
-        import json as _json2
-        from pathlib import Path as _Path2
-        _dbg2 = {"sessionId":"65c0a8","hypothesisId":"H1,H3","location":"matching_service.py","message":"After filtering","data":{"scored_count":len(scored),"top_matches_count":len(top_matches),"max_days_old":max_days_old},"timestamp":__import__("time").time()*1000}
-        try:
-            _log = str(_Path2.cwd() / "debug-65c0a8.log")
-            with open(_log, "a") as f:
-                f.write(_json2.dumps(_dbg2) + "\n")
-        except Exception:
-            try:
-                import httpx
-                httpx.post("http://127.0.0.1:7243/ingest/9319c197-5f30-450d-9bb3-de2a905787b1", json=_dbg2, headers={"Content-Type":"application/json","X-Debug-Session-Id":"65c0a8"}, timeout=0.3)
-            except Exception:
-                print("[DEBUG65c0a8]", _json2.dumps(_dbg2), flush=True)
-        # #endregion
+        total_available = len(scored)
+        top_matches = scored[offset : offset + top_k]
 
         results = []
         for combined_score, semantic_score, job_uuid, title, _, job_details in top_matches:
@@ -193,7 +163,7 @@ class MatchingService:
                 }
             )
 
-        return results
+        return (results, total_available)
 
     # ------------------------------------------------------------------
     # Taste-profile methods
@@ -262,11 +232,12 @@ class MatchingService:
         self,
         profile_id: str,
         top_k: int = 25,
+        offset: int = 0,
         exclude_rated: bool = True,
         user_id: str | None = None,
         min_similarity: float = 0.0,
         max_days_old: int | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], int]:
         """Find top jobs matching the user's taste-profile embedding.
 
         Pure semantic matching — no skills overlap (taste already encodes
@@ -274,14 +245,14 @@ class MatchingService:
         """
         taste_emb = self.store.get_taste_embedding(profile_id)
         if not taste_emb:
-            return []
+            return ([], 0)
 
         vector_limit = min(60000, max(2000, top_k * 100))
         job_embeddings = self.store.get_active_job_embeddings(
             query_embedding=taste_emb, limit=vector_limit
         )
         if not job_embeddings:
-            return []
+            return ([], 0)
 
         # Exclude already-rated (interested / not_interested) jobs
         rated_uuids: set[str] = set()
@@ -327,7 +298,8 @@ class MatchingService:
             return (combined, date_for_sort)
 
         scored.sort(reverse=True, key=sort_key)
-        top_matches = scored[:top_k]
+        total_available = len(scored)
+        top_matches = scored[offset : offset + top_k]
 
         results = []
         for combined_score, job_uuid, title, _, job_details in top_matches:
@@ -352,4 +324,4 @@ class MatchingService:
                 }
             )
 
-        return results
+        return (results, total_available)
