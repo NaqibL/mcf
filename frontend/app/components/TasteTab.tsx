@@ -155,9 +155,14 @@ export default function TasteTab() {
               placeholder="No limit"
               min={1}
               value={filters.maxDaysOld ?? ''}
-              onChange={(e) =>
-                setFilters({ ...filters, maxDaysOld: e.target.value ? parseInt(e.target.value) : null })
-              }
+              onChange={(e) => {
+                const val = e.target.value
+                const parsed = val ? parseInt(val, 10) : null
+                setFilters({
+                  ...filters,
+                  maxDaysOld: parsed != null && !Number.isNaN(parsed) && parsed > 0 ? parsed : null,
+                })
+              }}
               className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm
                 focus:outline-none focus:ring-2 focus:ring-purple-400"
             />

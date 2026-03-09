@@ -363,8 +363,8 @@ def get_matches(
         raise HTTPException(status_code=400, detail="mode must be 'resume' or 'taste'")
     if not 0.0 <= min_similarity <= 1.0:
         raise HTTPException(status_code=400, detail="min_similarity must be between 0.0 and 1.0")
-    if max_days_old is not None and max_days_old < 0:
-        raise HTTPException(status_code=400, detail="max_days_old must be a positive integer")
+    if max_days_old is not None and max_days_old <= 0:
+        max_days_old = None  # Treat invalid/zero as no filter
 
     profile = store.get_profile_by_user_id(user_id)
     if not profile:

@@ -15,6 +15,11 @@ from mcf.lib.storage.base import Storage
 _SEMANTIC_WEIGHT = 1.0
 _SKILLS_WEIGHT = 0.0
 
+# Recency factor: gentle penalty for older jobs (0.5% per day, floor 0.5).
+# Balances relevance with freshness without filtering out old jobs.
+_RECENCY_DECAY_PER_DAY = 0.005
+_RECENCY_FLOOR = 0.5
+
 
 class MatchingService:
     """Service for matching candidates to jobs and vice versa."""
@@ -98,39 +103,48 @@ class MatchingService:
 
             # Semantic similarity (cosine – embeddings are L2-normalised)
             job_vec = np.array(job_emb, dtype=np.float32)
-            score = float(np.dot(candidate_vec, job_vec))
+            semantic_score = float(np.dot(candidate_vec, job_vec))
 
             # At threshold 0, allow all scores including negative (cosine can be negative)
             effective_min = min_similarity if min_similarity > 0 else -1.0
-            if score < effective_min:
+            if semantic_score < effective_min:
                 continue
 
             last_seen_at = job_details.get("last_seen_at")
+            # Hard filter: only when user explicitly sets max_days_old
             if max_days_old is not None and last_seen_at:
                 if last_seen_at.tzinfo is None:
                     last_seen_at = last_seen_at.replace(tzinfo=timezone.utc)
                 if (datetime.now(timezone.utc) - last_seen_at).days > max_days_old:
                     continue
 
-            scored.append((score, job_uuid, title, last_seen_at, job_details))
+            # Recency-weighted score: balance relevance with freshness (never filter by default)
+            days_old = 0
+            if last_seen_at:
+                ts = last_seen_at if last_seen_at.tzinfo else last_seen_at.replace(tzinfo=timezone.utc)
+                days_old = max(0, (datetime.now(timezone.utc) - ts).days)
+            recency_factor = max(_RECENCY_FLOOR, 1.0 - _RECENCY_DECAY_PER_DAY * days_old)
+            combined_score = semantic_score * recency_factor
 
-        # Sort: score descending, then recency descending as tie-breaker
+            scored.append((combined_score, semantic_score, job_uuid, title, last_seen_at, job_details))
+
+        # Sort: combined score descending, then recency descending as tie-breaker
         def sort_key(x: tuple) -> tuple:
-            s, _, _, last_seen, _ = x
+            combined, _, _, _, last_seen, _ = x
             date_for_sort = last_seen if last_seen else datetime(1970, 1, 1, tzinfo=timezone.utc)
-            return (s, date_for_sort)
+            return (combined, date_for_sort)
 
         scored.sort(reverse=True, key=sort_key)
         top_matches = scored[:top_k]
 
         results = []
-        for score, job_uuid, title, _, job_details in top_matches:
+        for combined_score, semantic_score, job_uuid, title, _, job_details in top_matches:
             match_id = secrets.token_urlsafe(16)
             self.store.record_match(
                 match_id=match_id,
                 profile_id=profile_id,
                 job_uuid=job_uuid,
-                similarity_score=score,
+                similarity_score=combined_score,
                 match_type="candidate_initiated",
             )
             results.append(
@@ -140,7 +154,8 @@ class MatchingService:
                     "company_name": job_details.get("company_name"),
                     "location": job_details.get("location"),
                     "job_url": job_details.get("job_url"),
-                    "similarity_score": score,
+                    "similarity_score": combined_score,
+                    "semantic_score": semantic_score,
                     "job_skills": job_details.get("skills") or [],
                     "last_seen_at": job_details.get("last_seen_at"),
                 }
@@ -244,17 +259,17 @@ class MatchingService:
             )
 
         taste_vec = np.array(taste_emb, dtype=np.float32)
-        scored: list[tuple[float, str, str, datetime | None, dict]] = []
+        scored: list[tuple[float, str, str, datetime | None, dict]] = []  # (combined_score, uuid, title, last_seen, details)
 
         for job_uuid, title, job_emb, job_details in job_embeddings:
             if exclude_rated and job_uuid in rated_uuids:
                 continue
 
             job_vec = np.array(job_emb, dtype=np.float32)
-            score = float(np.dot(taste_vec, job_vec))
+            semantic_score = float(np.dot(taste_vec, job_vec))
 
             effective_min = min_similarity if min_similarity > 0 else -1.0
-            if score < effective_min:
+            if semantic_score < effective_min:
                 continue
 
             last_seen_at = job_details.get("last_seen_at")
@@ -264,24 +279,32 @@ class MatchingService:
                 if (datetime.now(timezone.utc) - last_seen_at).days > max_days_old:
                     continue
 
-            scored.append((score, job_uuid, title, last_seen_at, job_details))
+            # Recency-weighted score (same as resume matching)
+            days_old = 0
+            if last_seen_at:
+                ts = last_seen_at if last_seen_at.tzinfo else last_seen_at.replace(tzinfo=timezone.utc)
+                days_old = max(0, (datetime.now(timezone.utc) - ts).days)
+            recency_factor = max(_RECENCY_FLOOR, 1.0 - _RECENCY_DECAY_PER_DAY * days_old)
+            combined_score = semantic_score * recency_factor
+
+            scored.append((combined_score, job_uuid, title, last_seen_at, job_details))
 
         def sort_key(x: tuple) -> tuple:
-            score, _, _, last_seen, _ = x
+            combined, _, _, last_seen, _ = x
             date_for_sort = last_seen if last_seen else datetime(1970, 1, 1, tzinfo=timezone.utc)
-            return (score, date_for_sort)
+            return (combined, date_for_sort)
 
         scored.sort(reverse=True, key=sort_key)
         top_matches = scored[:top_k]
 
         results = []
-        for score, job_uuid, title, _, job_details in top_matches:
+        for combined_score, job_uuid, title, _, job_details in top_matches:
             match_id = secrets.token_urlsafe(16)
             self.store.record_match(
                 match_id=match_id,
                 profile_id=profile_id,
                 job_uuid=job_uuid,
-                similarity_score=score,
+                similarity_score=combined_score,
                 match_type="taste",
             )
             results.append(
@@ -291,7 +314,7 @@ class MatchingService:
                     "company_name": job_details.get("company_name"),
                     "location": job_details.get("location"),
                     "job_url": job_details.get("job_url"),
-                    "similarity_score": score,
+                    "similarity_score": combined_score,
                     "job_skills": job_details.get("skills") or [],
                     "last_seen_at": job_details.get("last_seen_at"),
                 }

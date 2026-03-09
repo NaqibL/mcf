@@ -107,7 +107,10 @@ export const matchesApi = {
     })
     if (excludeRatedOnly) params.append('exclude_rated_only', 'true')
     if (minSimilarity !== undefined) params.append('min_similarity', minSimilarity.toString())
-    if (maxDaysOld !== undefined) params.append('max_days_old', maxDaysOld.toString())
+    // Only pass max_days_old when explicitly set to a valid positive number (never filter by default)
+    if (maxDaysOld != null && !Number.isNaN(maxDaysOld) && maxDaysOld > 0) {
+      params.append('max_days_old', maxDaysOld.toString())
+    }
     const response = await api.get(`/api/matches?${params}`)
     return response.data as { matches: Match[]; total: number; mode: MatchMode }
   },
