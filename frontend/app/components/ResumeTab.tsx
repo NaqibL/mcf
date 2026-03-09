@@ -6,15 +6,21 @@ import type { Match, DiscoverStats } from '@/lib/types'
 import { MatchCard } from './JobCard'
 import toast from 'react-hot-toast'
 
-// How many resume-matched jobs to surface for rating at a time
 const BATCH_SIZE = 30
 
-export default function DiscoverTab() {
+interface Filters {
+  topK: number
+  minSimilarity: number
+  maxDaysOld: number | null
+}
+
+export default function ResumeTab() {
   const [jobs, setJobs] = useState<Match[]>([])
   const [stats, setStats] = useState<DiscoverStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [computing, setComputing] = useState(false)
   const [ratingUuids, setRatingUuids] = useState<Set<string>>(new Set())
+  const [filters, setFilters] = useState<Filters>({ topK: BATCH_SIZE, minSimilarity: 0, maxDaysOld: null })
 
   const loadStats = useCallback(async () => {
     try {
@@ -25,19 +31,23 @@ export default function DiscoverTab() {
     }
   }, [])
 
-  // Load top resume-matched, unrated jobs so users see relevant roles immediately
   const loadJobs = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await matchesApi.get('resume', true, BATCH_SIZE, undefined, undefined, true)
-      // Further filter out any jobs already rated in this session
+      const data = await matchesApi.get(
+        'resume',
+        true,
+        filters.topK,
+        filters.minSimilarity / 100,
+        filters.maxDaysOld ?? undefined,
+      )
       setJobs(data.matches)
     } catch (err: any) {
       toast.error('Failed to load jobs. Is the API server running?')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [filters.topK, filters.minSimilarity, filters.maxDaysOld])
 
   useEffect(() => {
     loadJobs()
@@ -46,8 +56,6 @@ export default function DiscoverTab() {
 
   const rate = async (uuid: string, interactionType: 'interested' | 'not_interested') => {
     setRatingUuids((prev) => new Set(prev).add(uuid))
-
-    // Optimistic removal — keep the list moving
     setJobs((prev) => prev.filter((j) => j.job_uuid !== uuid))
 
     try {
@@ -80,7 +88,7 @@ export default function DiscoverTab() {
     try {
       const result = await profileApi.computeTaste()
       toast.success(
-        `Taste profile updated from ${result.interested} interested jobs! Switch to Matches → Taste to see results.`,
+        `Taste profile updated from ${result.interested} interested jobs! Switch to Taste tab for personalised recommendations.`,
         { duration: 5000 },
       )
     } catch (err: any) {
@@ -163,9 +171,57 @@ export default function DiscoverTab() {
       {/* Hint */}
       <p className="text-sm text-gray-500 px-1">
         These are your top resume matches — rate each one to train your taste profile. Once you have
-        enough ratings, click <strong>Update Taste Profile</strong> then use{' '}
-        <strong>Matches → Taste</strong> for personalised recommendations.
+        enough ratings, click <strong>Update Taste Profile</strong> then use the <strong>Taste</strong> tab
+        for personalised recommendations.
       </p>
+
+      {/* Filters */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Min Match: <span className="text-blue-600 font-bold">{filters.minSimilarity}%</span>
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={80}
+              step={5}
+              value={filters.minSimilarity}
+              onChange={(e) => setFilters({ ...filters, minSimilarity: parseInt(e.target.value) })}
+              className="w-full accent-blue-600"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Max Days Old</label>
+            <input
+              type="number"
+              placeholder="No limit"
+              min={1}
+              value={filters.maxDaysOld ?? ''}
+              onChange={(e) =>
+                setFilters({ ...filters, maxDaysOld: e.target.value ? parseInt(e.target.value) : null })
+              }
+              className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm
+                focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Results</label>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={filters.topK}
+              onChange={(e) =>
+                setFilters({ ...filters, topK: parseInt(e.target.value) || BATCH_SIZE })
+              }
+              className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm
+                focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+          </div>
+        </div>
+      </div>
 
       {/* Job list */}
       {loading ? (
@@ -176,7 +232,7 @@ export default function DiscoverTab() {
           <p className="text-gray-600 font-medium">All current matches have been rated!</p>
           <p className="text-gray-400 text-sm mt-1">
             Run <code className="font-mono text-xs">mcf crawl-incremental</code> to pull new jobs,
-            or lower your filters in the Matches tab.
+            or lower your filters above.
           </p>
           <button
             onClick={loadJobs}

@@ -11,10 +11,10 @@ import numpy as np
 from mcf.lib.storage.base import Storage
 
 # Weights for the hybrid score: semantic similarity + skills keyword overlap.
-# Semantic embedding captures overall role alignment; skills overlap is a hard
-# signal that specific technologies/tools appear in the resume.
-_SEMANTIC_WEIGHT = 0.65
-_SKILLS_WEIGHT = 0.35
+# Semantic embedding captures overall role alignment; skills overlap is a light
+# signal (reduced from 0.35 to avoid penalizing jobs with noisy/sparse skills).
+_SEMANTIC_WEIGHT = 0.9
+_SKILLS_WEIGHT = 0.1
 
 
 class MatchingService:
@@ -48,8 +48,8 @@ class MatchingService:
         """Find top matching jobs for a candidate using a hybrid score.
 
         The final score is a weighted combination of:
-          • semantic similarity  (embedding dot-product, 65 %)
-          • skills keyword overlap  (job skills found in resume text, 35 %)
+          • semantic similarity  (embedding dot-product, 90 %)
+          • skills keyword overlap  (job skills found in resume text, 10 %)
 
         Args:
             profile_id: Candidate profile ID
@@ -65,7 +65,7 @@ class MatchingService:
             return []
 
         # Pass candidate embedding + limit for pgvector fast path (Postgres only)
-        vector_limit = min(500, top_k * 10)
+        vector_limit = min(2000, top_k * 25)
         job_embeddings = self.store.get_active_job_embeddings(
             query_embedding=candidate_emb, limit=vector_limit
         )
@@ -241,7 +241,7 @@ class MatchingService:
         if not taste_emb:
             return []
 
-        vector_limit = min(500, top_k * 10)
+        vector_limit = min(2000, top_k * 25)
         job_embeddings = self.store.get_active_job_embeddings(
             query_embedding=taste_emb, limit=vector_limit
         )

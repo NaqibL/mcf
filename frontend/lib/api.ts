@@ -98,7 +98,7 @@ export const matchesApi = {
     topK = 25,
     minSimilarity?: number,
     maxDaysOld?: number,
-    excludeRatedOnly = false,
+    excludeRatedOnly = true,
   ) => {
     const params = new URLSearchParams({
       mode,

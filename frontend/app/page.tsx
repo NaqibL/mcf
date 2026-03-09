@@ -5,14 +5,14 @@ import { profileApi } from '@/lib/api'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Profile } from '@/lib/types'
 import AuthGate from './components/AuthGate'
-import DiscoverTab from './components/DiscoverTab'
-import MatchesTab from './components/MatchesTab'
+import ResumeTab from './components/ResumeTab'
+import TasteTab from './components/TasteTab'
 import toast, { Toaster } from 'react-hot-toast'
 
-type Tab = 'discover' | 'matches'
+type Tab = 'resume' | 'taste'
 
 function App() {
-  const [tab, setTab] = useState<Tab>('discover')
+  const [tab, setTab] = useState<Tab>('resume')
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loadingProfile, setLoadingProfile] = useState(true)
   const [processingResume, setProcessingResume] = useState(false)
@@ -174,8 +174,8 @@ function App() {
         {/* Tab bar */}
         <div className="max-w-5xl mx-auto px-4 sm:px-6 flex gap-1 pb-0">
           {([
-            { id: 'discover', label: 'Discover', description: 'Rate jobs to build your taste profile' },
-            { id: 'matches', label: 'Matches', description: 'Find jobs matching your resume or taste' },
+            { id: 'resume', label: 'Resume', description: 'Rate resume-matched jobs to build your taste' },
+            { id: 'taste', label: 'Taste', description: 'Find jobs matching your taste profile' },
           ] as const).map(({ id, label, description }) => (
             <button
               key={id}
@@ -183,9 +183,9 @@ function App() {
               title={description}
               className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors
                 ${tab === id
-                  ? id === 'discover'
-                    ? 'border-purple-600 text-purple-700'
-                    : 'border-blue-600 text-blue-700'
+                  ? id === 'resume'
+                    ? 'border-blue-600 text-blue-700'
+                    : 'border-purple-600 text-purple-700'
                   : 'border-transparent text-gray-500 hover:text-gray-800'}`}
             >
               {label}
@@ -205,8 +205,8 @@ function App() {
 
       {/* Main content */}
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6">
-        {tab === 'discover' && <DiscoverTab />}
-        {tab === 'matches' && <MatchesTab />}
+        {tab === 'resume' && <ResumeTab />}
+        {tab === 'taste' && <TasteTab />}
       </main>
     </div>
   )

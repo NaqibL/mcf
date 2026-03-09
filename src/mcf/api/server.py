@@ -381,8 +381,8 @@ def get_matches(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "No taste profile found. Go to Discover, rate some jobs, "
-                    "then click 'Update Taste Profile'."
+                    "No taste profile found. Go to Resume, rate some jobs, "
+                    "then click Update Taste Profile."
                 ),
             )
         matches = svc.match_taste_to_jobs(
