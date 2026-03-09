@@ -64,8 +64,11 @@ class MatchingService:
         if not candidate_emb:
             return []
 
-        # Pass candidate embedding + limit for pgvector fast path (Postgres only)
-        vector_limit = min(2000, top_k * 25)
+        # Pass candidate embedding + limit for pgvector fast path (Postgres only).
+        # Use a large pool (up to 10000) so matches keep coming as users rate more jobs.
+        # Formula: ensure we have enough candidates after excluding rated (e.g. 500+ rated
+        # still leaves 9500 to choose from).
+        vector_limit = min(10000, max(2000, top_k * 100))
         job_embeddings = self.store.get_active_job_embeddings(
             query_embedding=candidate_emb, limit=vector_limit
         )
@@ -108,7 +111,9 @@ class MatchingService:
             # Hybrid score
             hybrid_score = _SEMANTIC_WEIGHT * semantic_score + _SKILLS_WEIGHT * skills_score
 
-            if hybrid_score < min_similarity:
+            # At threshold 0, allow all scores including negative (cosine can be negative)
+            effective_min = min_similarity if min_similarity > 0 else -1.0
+            if hybrid_score < effective_min:
                 continue
 
             last_seen_at = job_details.get("last_seen_at")
@@ -241,7 +246,7 @@ class MatchingService:
         if not taste_emb:
             return []
 
-        vector_limit = min(2000, top_k * 25)
+        vector_limit = min(10000, max(2000, top_k * 100))
         job_embeddings = self.store.get_active_job_embeddings(
             query_embedding=taste_emb, limit=vector_limit
         )
@@ -265,7 +270,8 @@ class MatchingService:
             job_vec = np.array(job_emb, dtype=np.float32)
             score = float(np.dot(taste_vec, job_vec))
 
-            if score < min_similarity:
+            effective_min = min_similarity if min_similarity > 0 else -1.0
+            if score < effective_min:
                 continue
 
             last_seen_at = job_details.get("last_seen_at")
