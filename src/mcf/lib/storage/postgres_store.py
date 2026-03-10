@@ -11,12 +11,9 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Iterable, Sequence
 
 import psycopg2
-
-_DEBUG_LOG = Path(__file__).resolve().parents[4] / "debug-9d86a1.log"
 import psycopg2.extras
 from psycopg2.extras import execute_values
 
@@ -340,10 +337,16 @@ class PostgresStore(Storage):
         limit: int | None = None,
     ) -> list[tuple[str, str, list[float], dict]]:
         emb_select, has_vector = self._job_embedding_schema()
-        # #region agent log
-        _plog = {"sessionId": "9d86a1", "hypothesisId": "E", "location": "postgres_store.py:get_active_job_embeddings", "message": "store entry", "data": {"limit": limit, "has_vector": has_vector, "has_query": query_embedding is not None}, "timestamp": __import__("time").time() * 1000}
-        _DEBUG_LOG.parent.mkdir(parents=True, exist_ok=True)
-        with _DEBUG_LOG.open("a") as _pf: _pf.write(json.dumps(_plog) + "\n")
+
+        # #region agent log (diagnostic)
+        import json as _json
+        from pathlib import Path as _Path
+        _dlog = _Path(__file__).resolve().parents[4] / "debug-match-25.log"
+        _dlog.write_text(
+            (_dlog.read_text(encoding="utf-8") if _dlog.exists() else "")
+            + _json.dumps({"event": "postgres_get_active_job_embeddings_entry", "limit": limit, "has_vector": has_vector}) + "\n",
+            encoding="utf-8",
+        )
         # #endregion
 
         # Use pgvector similarity search when query_embedding, limit, and vector column exist
@@ -382,9 +385,11 @@ class PostgresStore(Storage):
                         "skills": json.loads(skills_json) if skills_json else [],
                     }
                     out.append((uuid, title or "", json.loads(emb_json), job_details))
-                # #region agent log
-                _plog2 = {"sessionId": "9d86a1", "hypothesisId": "E", "location": "postgres_store.py:vector_path", "message": "vector search returned", "data": {"rows_returned": len(out)}, "timestamp": __import__("time").time() * 1000}
-                with _DEBUG_LOG.open("a") as _pf: _pf.write(json.dumps(_plog2) + "\n")
+                # #region agent log (diagnostic)
+                _dlog.write_text(
+                    _dlog.read_text(encoding="utf-8") + _json.dumps({"event": "postgres_vector_path", "rows_returned": len(out)}) + "\n",
+                    encoding="utf-8",
+                )
                 # #endregion
                 return out
             except psycopg2.ProgrammingError:
@@ -414,9 +419,11 @@ class PostgresStore(Storage):
                 "skills": json.loads(skills_json) if skills_json else [],
             }
             out.append((uuid, title or "", json.loads(emb_json), job_details))
-        # #region agent log
-        _plog3 = {"sessionId": "9d86a1", "hypothesisId": "E", "location": "postgres_store.py:full_scan", "message": "full scan path returned", "data": {"rows_returned": len(out)}, "timestamp": __import__("time").time() * 1000}
-        with _DEBUG_LOG.open("a") as _pf: _pf.write(json.dumps(_plog3) + "\n")
+        # #region agent log (diagnostic)
+        _dlog.write_text(
+            _dlog.read_text(encoding="utf-8") + _json.dumps({"event": "postgres_full_scan_path", "rows_returned": len(out)}) + "\n",
+            encoding="utf-8",
+        )
         # #endregion
         return out
 

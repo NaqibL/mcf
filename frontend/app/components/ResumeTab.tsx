@@ -50,9 +50,6 @@ export default function ResumeTab() {
           filters.minSimilarity / 100,
           filters.maxDaysOld ?? undefined,
         )
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/9319c197-5f30-450d-9bb3-de2a905787b1',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9d86a1'},body:JSON.stringify({sessionId:'9d86a1',hypothesisId:'G',location:'ResumeTab.tsx:loadJobs',message:'API response',data:{matchesLen:data.matches?.length,total:data.total,hasMore:data.has_more,offset,append},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         if (append) {
           setJobs((prev) => [...prev, ...data.matches])
         } else {

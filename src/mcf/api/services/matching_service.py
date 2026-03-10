@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-import json as _json
 import secrets
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from mcf.lib.storage.base import Storage
-
-_DEBUG_LOG = Path(__file__).resolve().parents[4] / "debug-9d86a1.log"
 
 # Pure semantic matching — skills keyword overlap removed.
 # Skills data is too noisy and inconsistently populated to be a reliable signal.
@@ -77,17 +73,33 @@ class MatchingService:
         # With ~60k jobs, the nearest N by similarity are often already rated; we need
         # to fetch beyond that into less-similar (but unrated) jobs. Use full pool.
         vector_limit = 60000
-        # #region agent log
-        _log = {"sessionId": "9d86a1", "hypothesisId": "A", "location": "matching_service.py:vector_limit", "message": "match_candidate_to_jobs params", "data": {"top_k": top_k, "offset": offset, "vector_limit": vector_limit, "exclude_interacted": exclude_interacted, "exclude_rated_only": exclude_rated_only}, "timestamp": __import__("time").time() * 1000}
-        _DEBUG_LOG.parent.mkdir(parents=True, exist_ok=True)
-        with _DEBUG_LOG.open("a") as _f: _f.write(_json.dumps(_log) + "\n")
+        # #region agent log (diagnostic)
+        import json
+        from pathlib import Path
+        _log_path = Path(__file__).resolve().parents[4] / "debug-match-25.log"
+        _log_path.write_text(
+            (_log_path.read_text(encoding="utf-8") if _log_path.exists() else "")
+            + json.dumps({
+                "event": "match_candidate_to_jobs_entry",
+                "vector_limit": vector_limit,
+                "top_k": top_k,
+                "offset": offset,
+            }) + "\n",
+            encoding="utf-8",
+        )
         # #endregion
         job_embeddings = self.store.get_active_job_embeddings(
             query_embedding=candidate_emb, limit=vector_limit
         )
-        # #region agent log
-        _log2 = {"sessionId": "9d86a1", "hypothesisId": "B", "location": "matching_service.py:job_embeddings", "message": "get_active_job_embeddings returned", "data": {"len_job_embeddings": len(job_embeddings) if job_embeddings else 0}, "timestamp": __import__("time").time() * 1000}
-        with _DEBUG_LOG.open("a") as _f: _f.write(_json.dumps(_log2) + "\n")
+        # #region agent log (diagnostic)
+        _log_path.write_text(
+            _log_path.read_text(encoding="utf-8") + json.dumps({
+                "event": "match_candidate_to_jobs_after_fetch",
+                "len_job_embeddings": len(job_embeddings) if job_embeddings else 0,
+                "store_type": type(self.store).__name__,
+            }) + "\n",
+            encoding="utf-8",
+        )
         # #endregion
         if not job_embeddings:
             return ([], 0)
@@ -107,11 +119,6 @@ class MatchingService:
                 )
             else:
                 interacted_jobs = self.store.get_interacted_jobs(user_id)
-
-        # #region agent log
-        _log3 = {"sessionId": "9d86a1", "hypothesisId": "C", "location": "matching_service.py:interacted", "message": "interacted_jobs count", "data": {"len_interacted_jobs": len(interacted_jobs), "exclude_rated_only": exclude_rated_only, "user_id": user_id[:8] + "…" if user_id else None}, "timestamp": __import__("time").time() * 1000}
-        with _DEBUG_LOG.open("a") as _f: _f.write(_json.dumps(_log3) + "\n")
-        # #endregion
 
         candidate_vec = np.array(candidate_emb, dtype=np.float32)
         scored: list[tuple[float, str, str, datetime | None, dict]] = []
@@ -157,9 +164,20 @@ class MatchingService:
         total_available = len(scored)
         top_matches = scored[offset : offset + top_k]
 
-        # #region agent log
-        _log4 = {"sessionId": "9d86a1", "hypothesisId": "D", "location": "matching_service.py:scored", "message": "after scoring loop", "data": {"len_scored": len(scored), "total_available": total_available, "len_top_matches": len(top_matches), "offset": offset}, "timestamp": __import__("time").time() * 1000}
-        with _DEBUG_LOG.open("a") as _f: _f.write(_json.dumps(_log4) + "\n")
+        # #region agent log (diagnostic)
+        import json
+        from pathlib import Path
+        _log_path = Path(__file__).resolve().parents[4] / "debug-match-25.log"
+        _log_path.write_text(
+            _log_path.read_text(encoding="utf-8") + json.dumps({
+                "event": "match_candidate_to_jobs_exit",
+                "len_scored": len(scored),
+                "total_available": total_available,
+                "len_top_matches": len(top_matches),
+                "len_interacted_jobs": len(interacted_jobs),
+            }) + "\n",
+            encoding="utf-8",
+        )
         # #endregion
 
         results = []

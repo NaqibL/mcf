@@ -24,6 +24,19 @@ from mcf.lib.storage.base import Storage
 
 def _make_store() -> Storage:
     """Return a DuckDBStore or PostgresStore depending on DATABASE_URL."""
+    # #region agent log (diagnostic)
+    import json
+    from pathlib import Path as _P
+    _log = _P(__file__).resolve().parents[3] / "debug-match-25.log"
+    _log.write_text(
+        json.dumps({
+            "event": "store_selection",
+            "database_url_set": bool(settings.database_url),
+            "store": "PostgresStore" if settings.database_url else "DuckDBStore",
+        }) + "\n",
+        encoding="utf-8",
+    )
+    # #endregion
     if settings.database_url:
         from mcf.lib.storage.postgres_store import PostgresStore
 
