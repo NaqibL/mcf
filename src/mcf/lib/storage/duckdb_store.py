@@ -12,6 +12,8 @@ import duckdb
 
 from mcf.lib.storage.base import RunStats, Storage
 
+_DEBUG_LOG = Path(__file__).resolve().parents[4] / "debug-9d86a1.log"
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -395,9 +397,9 @@ class DuckDBStore(Storage):
             }
             out.append((uuid, title or "", json.loads(emb_json), job_details))
         # #region agent log
-        import json as _dj
         _dlog = {"sessionId": "9d86a1", "hypothesisId": "F", "location": "duckdb_store.py:get_active_job_embeddings", "message": "DuckDB store returned", "data": {"rows_returned": len(out), "limit_passed": limit}, "timestamp": __import__("time").time() * 1000}
-        open("debug-9d86a1.log", "a").write(_dj.dumps(_dlog) + "\n")
+        _DEBUG_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with _DEBUG_LOG.open("a") as _df: _df.write(json.dumps(_dlog) + "\n")
         # #endregion
         return out
 

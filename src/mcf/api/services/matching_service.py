@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import json as _json
 import secrets
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from mcf.lib.storage.base import Storage
+
+_DEBUG_LOG = Path(__file__).resolve().parents[4] / "debug-9d86a1.log"
 
 # Pure semantic matching — skills keyword overlap removed.
 # Skills data is too noisy and inconsistently populated to be a reliable signal.
@@ -74,16 +78,16 @@ class MatchingService:
         # Formula: ensure we have enough candidates after excluding rated.
         vector_limit = min(60000, max(20000, top_k * 100))
         # #region agent log
-        import json as _json
         _log = {"sessionId": "9d86a1", "hypothesisId": "A", "location": "matching_service.py:vector_limit", "message": "match_candidate_to_jobs params", "data": {"top_k": top_k, "offset": offset, "vector_limit": vector_limit, "exclude_interacted": exclude_interacted, "exclude_rated_only": exclude_rated_only}, "timestamp": __import__("time").time() * 1000}
-        open("debug-9d86a1.log", "a").write(_json.dumps(_log) + "\n")
+        _DEBUG_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with _DEBUG_LOG.open("a") as _f: _f.write(_json.dumps(_log) + "\n")
         # #endregion
         job_embeddings = self.store.get_active_job_embeddings(
             query_embedding=candidate_emb, limit=vector_limit
         )
         # #region agent log
         _log2 = {"sessionId": "9d86a1", "hypothesisId": "B", "location": "matching_service.py:job_embeddings", "message": "get_active_job_embeddings returned", "data": {"len_job_embeddings": len(job_embeddings) if job_embeddings else 0}, "timestamp": __import__("time").time() * 1000}
-        open("debug-9d86a1.log", "a").write(_json.dumps(_log2) + "\n")
+        with _DEBUG_LOG.open("a") as _f: _f.write(_json.dumps(_log2) + "\n")
         # #endregion
         if not job_embeddings:
             return ([], 0)
@@ -106,7 +110,7 @@ class MatchingService:
 
         # #region agent log
         _log3 = {"sessionId": "9d86a1", "hypothesisId": "C", "location": "matching_service.py:interacted", "message": "interacted_jobs count", "data": {"len_interacted_jobs": len(interacted_jobs), "exclude_rated_only": exclude_rated_only, "user_id": user_id[:8] + "…" if user_id else None}, "timestamp": __import__("time").time() * 1000}
-        open("debug-9d86a1.log", "a").write(_json.dumps(_log3) + "\n")
+        with _DEBUG_LOG.open("a") as _f: _f.write(_json.dumps(_log3) + "\n")
         # #endregion
 
         candidate_vec = np.array(candidate_emb, dtype=np.float32)
@@ -155,7 +159,7 @@ class MatchingService:
 
         # #region agent log
         _log4 = {"sessionId": "9d86a1", "hypothesisId": "D", "location": "matching_service.py:scored", "message": "after scoring loop", "data": {"len_scored": len(scored), "total_available": total_available, "len_top_matches": len(top_matches), "offset": offset}, "timestamp": __import__("time").time() * 1000}
-        open("debug-9d86a1.log", "a").write(_json.dumps(_log4) + "\n")
+        with _DEBUG_LOG.open("a") as _f: _f.write(_json.dumps(_log4) + "\n")
         # #endregion
 
         results = []
