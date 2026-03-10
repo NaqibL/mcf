@@ -394,6 +394,11 @@ class DuckDBStore(Storage):
                 "skills": json.loads(skills_json) if skills_json else [],
             }
             out.append((uuid, title or "", json.loads(emb_json), job_details))
+        # #region agent log
+        import json as _dj
+        _dlog = {"sessionId": "9d86a1", "hypothesisId": "F", "location": "duckdb_store.py:get_active_job_embeddings", "message": "DuckDB store returned", "data": {"rows_returned": len(out), "limit_passed": limit}, "timestamp": __import__("time").time() * 1000}
+        open("debug-9d86a1.log", "a").write(_dj.dumps(_dlog) + "\n")
+        # #endregion
         return out
 
     def get_all_active_jobs(self) -> list[dict]:

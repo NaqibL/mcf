@@ -337,6 +337,11 @@ class PostgresStore(Storage):
         limit: int | None = None,
     ) -> list[tuple[str, str, list[float], dict]]:
         emb_select, has_vector = self._job_embedding_schema()
+        # #region agent log
+        import json as _pj
+        _plog = {"sessionId": "9d86a1", "hypothesisId": "E", "location": "postgres_store.py:get_active_job_embeddings", "message": "store entry", "data": {"limit": limit, "has_vector": has_vector, "has_query": query_embedding is not None}, "timestamp": __import__("time").time() * 1000}
+        open("debug-9d86a1.log", "a").write(_pj.dumps(_plog) + "\n")
+        # #endregion
 
         # Use pgvector similarity search when query_embedding, limit, and vector column exist
         if (
@@ -374,6 +379,10 @@ class PostgresStore(Storage):
                         "skills": json.loads(skills_json) if skills_json else [],
                     }
                     out.append((uuid, title or "", json.loads(emb_json), job_details))
+                # #region agent log
+                _plog2 = {"sessionId": "9d86a1", "hypothesisId": "E", "location": "postgres_store.py:vector_path", "message": "vector search returned", "data": {"rows_returned": len(out)}, "timestamp": __import__("time").time() * 1000}
+                open("debug-9d86a1.log", "a").write(json.dumps(_plog2) + "\n")
+                # #endregion
                 return out
             except psycopg2.ProgrammingError:
                 pass  # Fall through to full scan
@@ -402,6 +411,10 @@ class PostgresStore(Storage):
                 "skills": json.loads(skills_json) if skills_json else [],
             }
             out.append((uuid, title or "", json.loads(emb_json), job_details))
+        # #region agent log
+        _plog3 = {"sessionId": "9d86a1", "hypothesisId": "E", "location": "postgres_store.py:full_scan", "message": "full scan path returned", "data": {"rows_returned": len(out)}, "timestamp": __import__("time").time() * 1000}
+        open("debug-9d86a1.log", "a").write(json.dumps(_plog3) + "\n")
+        # #endregion
         return out
 
     def get_all_active_jobs(self) -> list[dict]:

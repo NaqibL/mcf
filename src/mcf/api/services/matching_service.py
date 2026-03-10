@@ -73,9 +73,18 @@ class MatchingService:
         # With ~60k jobs, a 10k cap left most of the nearest jobs rated → ~23 results.
         # Formula: ensure we have enough candidates after excluding rated.
         vector_limit = min(60000, max(20000, top_k * 100))
+        # #region agent log
+        import json as _json
+        _log = {"sessionId": "9d86a1", "hypothesisId": "A", "location": "matching_service.py:vector_limit", "message": "match_candidate_to_jobs params", "data": {"top_k": top_k, "offset": offset, "vector_limit": vector_limit, "exclude_interacted": exclude_interacted, "exclude_rated_only": exclude_rated_only}, "timestamp": __import__("time").time() * 1000}
+        open("debug-9d86a1.log", "a").write(_json.dumps(_log) + "\n")
+        # #endregion
         job_embeddings = self.store.get_active_job_embeddings(
             query_embedding=candidate_emb, limit=vector_limit
         )
+        # #region agent log
+        _log2 = {"sessionId": "9d86a1", "hypothesisId": "B", "location": "matching_service.py:job_embeddings", "message": "get_active_job_embeddings returned", "data": {"len_job_embeddings": len(job_embeddings) if job_embeddings else 0}, "timestamp": __import__("time").time() * 1000}
+        open("debug-9d86a1.log", "a").write(_json.dumps(_log2) + "\n")
+        # #endregion
         if not job_embeddings:
             return ([], 0)
 
@@ -94,6 +103,11 @@ class MatchingService:
                 )
             else:
                 interacted_jobs = self.store.get_interacted_jobs(user_id)
+
+        # #region agent log
+        _log3 = {"sessionId": "9d86a1", "hypothesisId": "C", "location": "matching_service.py:interacted", "message": "interacted_jobs count", "data": {"len_interacted_jobs": len(interacted_jobs), "exclude_rated_only": exclude_rated_only, "user_id": user_id[:8] + "…" if user_id else None}, "timestamp": __import__("time").time() * 1000}
+        open("debug-9d86a1.log", "a").write(_json.dumps(_log3) + "\n")
+        # #endregion
 
         candidate_vec = np.array(candidate_emb, dtype=np.float32)
         scored: list[tuple[float, str, str, datetime | None, dict]] = []
@@ -138,6 +152,11 @@ class MatchingService:
         scored.sort(reverse=True, key=sort_key)
         total_available = len(scored)
         top_matches = scored[offset : offset + top_k]
+
+        # #region agent log
+        _log4 = {"sessionId": "9d86a1", "hypothesisId": "D", "location": "matching_service.py:scored", "message": "after scoring loop", "data": {"len_scored": len(scored), "total_available": total_available, "len_top_matches": len(top_matches), "offset": offset}, "timestamp": __import__("time").time() * 1000}
+        open("debug-9d86a1.log", "a").write(_json.dumps(_log4) + "\n")
+        # #endregion
 
         results = []
         for combined_score, semantic_score, job_uuid, title, _, job_details in top_matches:
