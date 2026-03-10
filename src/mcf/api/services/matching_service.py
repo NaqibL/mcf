@@ -73,10 +73,10 @@ class MatchingService:
             return ([], 0)
 
         # Pass candidate embedding + limit for pgvector fast path (Postgres only).
-        # Use a large pool (up to 60000) so matches keep coming as users rate more jobs.
-        # With ~60k jobs, a 10k cap left most of the nearest jobs rated → ~23 results.
-        # Formula: ensure we have enough candidates after excluding rated.
-        vector_limit = min(60000, max(20000, top_k * 100))
+        # Use a large pool (60000) so matches keep coming as users rate more jobs.
+        # With ~60k jobs, the nearest N by similarity are often already rated; we need
+        # to fetch beyond that into less-similar (but unrated) jobs. Use full pool.
+        vector_limit = 60000
         # #region agent log
         _log = {"sessionId": "9d86a1", "hypothesisId": "A", "location": "matching_service.py:vector_limit", "message": "match_candidate_to_jobs params", "data": {"top_k": top_k, "offset": offset, "vector_limit": vector_limit, "exclude_interacted": exclude_interacted, "exclude_rated_only": exclude_rated_only}, "timestamp": __import__("time").time() * 1000}
         _DEBUG_LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -270,7 +270,7 @@ class MatchingService:
         if not taste_emb:
             return ([], 0)
 
-        vector_limit = min(60000, max(20000, top_k * 100))
+        vector_limit = 60000
         job_embeddings = self.store.get_active_job_embeddings(
             query_embedding=taste_emb, limit=vector_limit
         )
