@@ -140,6 +140,12 @@ function App() {
             >
               How it works
             </Link>
+            <Link
+              href="/dashboard"
+              className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              Dashboard
+            </Link>
           </div>
 
           {/* Resume status + upload */}

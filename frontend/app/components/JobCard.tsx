@@ -12,7 +12,8 @@ export function getDaysAgo(dateStr?: string): number | null {
 
 function RecencyBadge({ daysAgo }: { daysAgo: number | null }) {
   if (daysAgo === null) return null
-  const label = daysAgo === 0 ? 'Today' : daysAgo === 1 ? '1 day ago' : `${daysAgo} days ago`
+  const label =
+    daysAgo === 0 ? 'Last seen today' : daysAgo === 1 ? 'Last seen 1 day ago' : `Last seen ${daysAgo} days ago`
   const cls =
     daysAgo <= 7
       ? 'bg-emerald-100 text-emerald-700'

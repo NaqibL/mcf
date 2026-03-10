@@ -143,6 +143,58 @@ def get_discover_stats(user_id: str = Depends(get_current_user)):
 
 
 # ---------------------------------------------------------------------------
+# Dashboard endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/dashboard/summary")
+def get_dashboard_summary(user_id: str = Depends(get_current_user)):
+    """Return dashboard summary: total jobs, active, by source, jobs with embeddings."""
+    store = get_store()
+    return store.get_dashboard_summary()
+
+
+@app.get("/api/dashboard/jobs-over-time")
+def get_dashboard_jobs_over_time(
+    limit_days: int = Query(default=90, ge=1, le=365),
+    user_id: str = Depends(get_current_user),
+):
+    """Return daily job counts over time (first_seen_at bucketed by day)."""
+    store = get_store()
+    return store.get_jobs_over_time(bucket_days=1, limit_days=limit_days)
+
+
+@app.get("/api/dashboard/crawl-runs")
+def get_dashboard_crawl_runs(
+    limit: int = Query(default=50, ge=1, le=200),
+    user_id: str = Depends(get_current_user),
+):
+    """Return recent crawl runs with added/maintained/removed counts."""
+    store = get_store()
+    return store.get_recent_runs(limit=limit)
+
+
+@app.get("/api/dashboard/top-companies")
+def get_dashboard_top_companies(
+    limit: int = Query(default=20, ge=1, le=50),
+    user_id: str = Depends(get_current_user),
+):
+    """Return top companies by active job count."""
+    store = get_store()
+    return store.get_top_companies(limit=limit)
+
+
+@app.get("/api/dashboard/jobs-by-location")
+def get_dashboard_jobs_by_location(
+    limit: int = Query(default=20, ge=1, le=50),
+    user_id: str = Depends(get_current_user),
+):
+    """Return job counts by location."""
+    store = get_store()
+    return store.get_jobs_by_location(limit=limit)
+
+
+# ---------------------------------------------------------------------------
 # Profile endpoints
 # ---------------------------------------------------------------------------
 

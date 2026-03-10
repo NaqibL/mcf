@@ -207,6 +207,20 @@ class Storage(ABC):
     @abstractmethod
     def get_discover_stats(self, user_id: str) -> dict: ...
 
+    # === Dashboard ===
+
+    @abstractmethod
+    def get_dashboard_summary(self) -> dict: ...
+
+    @abstractmethod
+    def get_jobs_over_time(self, bucket_days: int = 1, limit_days: int = 90) -> list[dict]: ...
+
+    @abstractmethod
+    def get_top_companies(self, limit: int = 20) -> list[dict]: ...
+
+    @abstractmethod
+    def get_jobs_by_location(self, limit: int = 20) -> list[dict]: ...
+
     def reset_profile_ratings(self, user_id: str) -> dict:
         """Reset job interactions and taste profile for a user (for testing).
         Returns counts of deleted rows. Override in store implementations."""

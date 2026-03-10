@@ -125,3 +125,49 @@ export const discoverApi = {
     return response.data as DiscoverStats
   },
 }
+
+// Dashboard API
+export const dashboardApi = {
+  getSummary: async () => {
+    const response = await api.get('/api/dashboard/summary')
+    return response.data as {
+      total_jobs: number
+      active_jobs: number
+      inactive_jobs: number
+      by_source: Record<string, number>
+      jobs_with_embeddings: number
+    }
+  },
+  getJobsOverTime: async (limitDays = 90) => {
+    const response = await api.get('/api/dashboard/jobs-over-time', {
+      params: { limit_days: limitDays },
+    })
+    return response.data as Array<{ date: string; count: number; cumulative: number }>
+  },
+  getCrawlRuns: async (limit = 50) => {
+    const response = await api.get('/api/dashboard/crawl-runs', {
+      params: { limit },
+    })
+    return response.data as Array<{
+      run_id: string
+      started_at: string
+      finished_at: string | null
+      total_seen: number
+      added: number
+      maintained: number
+      removed: number
+    }>
+  },
+  getTopCompanies: async (limit = 20) => {
+    const response = await api.get('/api/dashboard/top-companies', {
+      params: { limit },
+    })
+    return response.data as Array<{ company_name: string; count: number }>
+  },
+  getJobsByLocation: async (limit = 20) => {
+    const response = await api.get('/api/dashboard/jobs-by-location', {
+      params: { limit },
+    })
+    return response.data as Array<{ location: string; count: number }>
+  },
+}

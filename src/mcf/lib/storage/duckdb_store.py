@@ -853,6 +853,98 @@ class DuckDBStore(Storage):
             "total_rated": interested + not_interested,
         }
 
+    # === Dashboard ===
+
+    def get_dashboard_summary(self) -> dict:
+        row = self._con.execute(
+            """
+            SELECT
+              COUNT(*) AS total,
+              COUNT(*) FILTER (WHERE is_active = TRUE) AS active,
+              COUNT(*) FILTER (WHERE is_active = FALSE) AS inactive
+            FROM jobs
+            """
+        ).fetchone()
+        total = row[0] if row else 0
+        active = row[1] if row else 0
+        inactive = row[2] if row else 0
+
+        rows = self._con.execute(
+            """
+            SELECT COALESCE(job_source, 'mcf') AS src, COUNT(*) AS cnt
+            FROM jobs
+            GROUP BY COALESCE(job_source, 'mcf')
+            """
+        ).fetchall()
+        by_source = {r[0]: r[1] for r in rows}
+
+        row = self._con.execute(
+            """
+            SELECT COUNT(*) FROM jobs j
+            JOIN job_embeddings e ON e.job_uuid = j.job_uuid
+            WHERE j.is_active = TRUE
+            """
+        ).fetchone()
+        jobs_with_embeddings = row[0] if row else 0
+
+        return {
+            "total_jobs": total,
+            "active_jobs": active,
+            "inactive_jobs": inactive,
+            "by_source": by_source,
+            "jobs_with_embeddings": jobs_with_embeddings,
+        }
+
+    def get_jobs_over_time(self, bucket_days: int = 1, limit_days: int = 90) -> list[dict]:
+        from datetime import timedelta
+
+        cutoff = _utcnow() - timedelta(days=limit_days)
+        rows = self._con.execute(
+            """
+            SELECT CAST(first_seen_at AS DATE) AS day, COUNT(*) AS count
+            FROM jobs
+            WHERE first_seen_at IS NOT NULL
+              AND first_seen_at >= ?
+            GROUP BY CAST(first_seen_at AS DATE)
+            ORDER BY day ASC
+            """,
+            [cutoff],
+        ).fetchall()
+        daily = [{"date": str(r[0]), "count": r[1]} for r in rows]
+        cumulative = 0
+        for d in daily:
+            cumulative += d["count"]
+            d["cumulative"] = cumulative
+        return daily
+
+    def get_top_companies(self, limit: int = 20) -> list[dict]:
+        rows = self._con.execute(
+            """
+            SELECT COALESCE(company_name, '(Unknown)') AS company_name, COUNT(*) AS count
+            FROM jobs
+            WHERE is_active = TRUE
+            GROUP BY COALESCE(company_name, '(Unknown)')
+            ORDER BY count DESC
+            LIMIT ?
+            """,
+            [limit],
+        ).fetchall()
+        return [{"company_name": r[0], "count": r[1]} for r in rows]
+
+    def get_jobs_by_location(self, limit: int = 20) -> list[dict]:
+        rows = self._con.execute(
+            """
+            SELECT COALESCE(location, '(Unknown)') AS location, COUNT(*) AS count
+            FROM jobs
+            WHERE is_active = TRUE
+            GROUP BY COALESCE(location, '(Unknown)')
+            ORDER BY count DESC
+            LIMIT ?
+            """,
+            [limit],
+        ).fetchall()
+        return [{"location": r[0], "count": r[1]} for r in rows]
+
     def upsert_taste_embedding(self, *, profile_id: str, model_name: str, embedding: Sequence[float]) -> None:
         """Store a taste-profile embedding.
 

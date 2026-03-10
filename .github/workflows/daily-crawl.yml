@@ -61,7 +61,7 @@ jobs:
 
       - name: Run incremental crawl (MCF + Careers@Gov)
         run: |
-          SOURCE="${{ github.event.inputs.source || 'all' }}"
+          SOURCE="${{ github.event.inputs.source || 'mcf' }}"
           CATS="${{ steps.set_cats.outputs.categories }}"
           if [ -n "$CATS" ]; then
             uv run mcf crawl-incremental --source "$SOURCE" --categories "$CATS"
