@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 from datetime import datetime, timezone
 from typing import Any
@@ -9,6 +10,8 @@ from typing import Any
 import numpy as np
 
 from mcf.lib.storage.base import Storage
+
+logger = logging.getLogger(__name__)
 
 # Pure semantic matching — skills keyword overlap removed.
 # Skills data is too noisy and inconsistently populated to be a reliable signal.
@@ -73,34 +76,15 @@ class MatchingService:
         # With ~60k jobs, the nearest N by similarity are often already rated; we need
         # to fetch beyond that into less-similar (but unrated) jobs. Use full pool.
         vector_limit = 60000
-        # #region agent log (diagnostic)
-        import json
-        from pathlib import Path
-        _log_path = Path(__file__).resolve().parents[4] / "debug-match-25.log"
-        _log_path.write_text(
-            (_log_path.read_text(encoding="utf-8") if _log_path.exists() else "")
-            + json.dumps({
-                "event": "match_candidate_to_jobs_entry",
-                "vector_limit": vector_limit,
-                "top_k": top_k,
-                "offset": offset,
-            }) + "\n",
-            encoding="utf-8",
-        )
-        # #endregion
+        logger.debug("match_candidate_to_jobs_entry vector_limit=%s top_k=%s offset=%s", vector_limit, top_k, offset)
         job_embeddings = self.store.get_active_job_embeddings(
             query_embedding=candidate_emb, limit=vector_limit
         )
-        # #region agent log (diagnostic)
-        _log_path.write_text(
-            _log_path.read_text(encoding="utf-8") + json.dumps({
-                "event": "match_candidate_to_jobs_after_fetch",
-                "len_job_embeddings": len(job_embeddings) if job_embeddings else 0,
-                "store_type": type(self.store).__name__,
-            }) + "\n",
-            encoding="utf-8",
+        logger.debug(
+            "match_candidate_to_jobs_after_fetch len_job_embeddings=%s store_type=%s",
+            len(job_embeddings) if job_embeddings else 0,
+            type(self.store).__name__,
         )
-        # #endregion
         if not job_embeddings:
             return ([], 0)
 
@@ -164,21 +148,10 @@ class MatchingService:
         total_available = len(scored)
         top_matches = scored[offset : offset + top_k]
 
-        # #region agent log (diagnostic)
-        import json
-        from pathlib import Path
-        _log_path = Path(__file__).resolve().parents[4] / "debug-match-25.log"
-        _log_path.write_text(
-            _log_path.read_text(encoding="utf-8") + json.dumps({
-                "event": "match_candidate_to_jobs_exit",
-                "len_scored": len(scored),
-                "total_available": total_available,
-                "len_top_matches": len(top_matches),
-                "len_interacted_jobs": len(interacted_jobs),
-            }) + "\n",
-            encoding="utf-8",
+        logger.debug(
+            "match_candidate_to_jobs_exit len_scored=%s total_available=%s len_top_matches=%s len_interacted_jobs=%s",
+            len(scored), total_available, len(top_matches), len(interacted_jobs),
         )
-        # #endregion
 
         results = []
         for combined_score, semantic_score, job_uuid, title, _, job_details in top_matches:

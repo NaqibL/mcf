@@ -34,6 +34,7 @@ class Settings(BaseSettings):
 
     # --- API ---
     api_port: int = int(os.getenv("API_PORT", "8000"))
+    log_level: str = "INFO"  # Set LOG_LEVEL=DEBUG for match diagnostics in production
     # Comma-separated list of allowed CORS origins (e.g. https://myapp.vercel.app)
     allowed_origins: str = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
     # When true, allow requests without Authorization header to use default_user_id (local dev only)

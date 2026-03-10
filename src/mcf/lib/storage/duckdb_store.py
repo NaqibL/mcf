@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,6 +12,8 @@ from typing import Iterable, Sequence
 import duckdb
 
 from mcf.lib.storage.base import RunStats, Storage
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -394,15 +397,7 @@ class DuckDBStore(Storage):
                 "skills": json.loads(skills_json) if skills_json else [],
             }
             out.append((uuid, title or "", json.loads(emb_json), job_details))
-        # #region agent log (diagnostic)
-        from pathlib import Path
-        _dlog = Path(__file__).resolve().parents[4] / "debug-match-25.log"
-        _dlog.write_text(
-            (_dlog.read_text(encoding="utf-8") if _dlog.exists() else "")
-            + json.dumps({"event": "duckdb_get_active_job_embeddings", "rows_returned": len(out), "limit_passed": limit}) + "\n",
-            encoding="utf-8",
-        )
-        # #endregion
+        logger.debug("get_active_job_embeddings rows_returned=%s limit_passed=%s", len(out), limit)
         return out
 
     def get_all_active_jobs(self) -> list[dict]:

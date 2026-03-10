@@ -24,19 +24,8 @@ from mcf.lib.storage.base import Storage
 
 def _make_store() -> Storage:
     """Return a DuckDBStore or PostgresStore depending on DATABASE_URL."""
-    # #region agent log (diagnostic)
-    import json
-    from pathlib import Path as _P
-    _log = _P(__file__).resolve().parents[3] / "debug-match-25.log"
-    _log.write_text(
-        json.dumps({
-            "event": "store_selection",
-            "database_url_set": bool(settings.database_url),
-            "store": "PostgresStore" if settings.database_url else "DuckDBStore",
-        }) + "\n",
-        encoding="utf-8",
-    )
-    # #endregion
+    store_type = "PostgresStore" if settings.database_url else "DuckDBStore"
+    logging.info("store_selection database_url_set=%s store=%s", bool(settings.database_url), store_type)
     if settings.database_url:
         from mcf.lib.storage.postgres_store import PostgresStore
 
@@ -55,6 +44,8 @@ _store: Storage | None = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import logging as _log
+    _log.basicConfig(level=getattr(_log, settings.log_level.upper(), _log.INFO))
     global _store
     _store = _make_store()
     yield

@@ -10,6 +10,7 @@ The DATABASE_URL must be a libpq-style connection string, e.g.:
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Iterable, Sequence
 
@@ -18,6 +19,8 @@ import psycopg2.extras
 from psycopg2.extras import execute_values
 
 from mcf.lib.storage.base import RunStats, Storage
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -338,16 +341,7 @@ class PostgresStore(Storage):
     ) -> list[tuple[str, str, list[float], dict]]:
         emb_select, has_vector = self._job_embedding_schema()
 
-        # #region agent log (diagnostic)
-        import json as _json
-        from pathlib import Path as _Path
-        _dlog = _Path(__file__).resolve().parents[4] / "debug-match-25.log"
-        _dlog.write_text(
-            (_dlog.read_text(encoding="utf-8") if _dlog.exists() else "")
-            + _json.dumps({"event": "postgres_get_active_job_embeddings_entry", "limit": limit, "has_vector": has_vector}) + "\n",
-            encoding="utf-8",
-        )
-        # #endregion
+        logger.debug("get_active_job_embeddings limit=%s has_vector=%s", limit, has_vector)
 
         # Use pgvector similarity search when query_embedding, limit, and vector column exist
         if (
@@ -385,12 +379,7 @@ class PostgresStore(Storage):
                         "skills": json.loads(skills_json) if skills_json else [],
                     }
                     out.append((uuid, title or "", json.loads(emb_json), job_details))
-                # #region agent log (diagnostic)
-                _dlog.write_text(
-                    _dlog.read_text(encoding="utf-8") + _json.dumps({"event": "postgres_vector_path", "rows_returned": len(out)}) + "\n",
-                    encoding="utf-8",
-                )
-                # #endregion
+                logger.debug("get_active_job_embeddings vector_path rows_returned=%s", len(out))
                 return out
             except psycopg2.ProgrammingError:
                 pass  # Fall through to full scan
@@ -419,12 +408,7 @@ class PostgresStore(Storage):
                 "skills": json.loads(skills_json) if skills_json else [],
             }
             out.append((uuid, title or "", json.loads(emb_json), job_details))
-        # #region agent log (diagnostic)
-        _dlog.write_text(
-            _dlog.read_text(encoding="utf-8") + _json.dumps({"event": "postgres_full_scan_path", "rows_returned": len(out)}) + "\n",
-            encoding="utf-8",
-        )
-        # #endregion
+        logger.debug("get_active_job_embeddings full_scan_path rows_returned=%s", len(out))
         return out
 
     def get_all_active_jobs(self) -> list[dict]:
