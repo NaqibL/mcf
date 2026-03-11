@@ -100,6 +100,7 @@ export const matchesApi = {
     minSimilarity?: number,
     maxDaysOld?: number,
     excludeRatedOnly = true,
+    sessionId?: string,
   ) => {
     const params = new URLSearchParams({
       mode,
@@ -113,8 +114,15 @@ export const matchesApi = {
     if (maxDaysOld != null && !Number.isNaN(maxDaysOld) && maxDaysOld > 0) {
       params.append('max_days_old', maxDaysOld.toString())
     }
+    if (sessionId) params.append('session_id', sessionId)
     const response = await api.get(`/api/matches?${params}`)
-    return response.data as { matches: Match[]; total: number; has_more: boolean; mode: MatchMode }
+    return response.data as {
+      matches: Match[]
+      total: number
+      has_more: boolean
+      mode: MatchMode
+      session_id: string
+    }
   },
 }
 

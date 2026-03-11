@@ -125,6 +125,37 @@ class Storage(ABC):
     @abstractmethod
     def get_embedding_model_name(self) -> str | None: ...
 
+    @abstractmethod
+    def get_active_job_ids_ranked(
+        self,
+        query_embedding: Sequence[float],
+        limit: int = 5000,
+    ) -> list[tuple[str, float, datetime | None]]:
+        """Return (job_uuid, cosine_distance, last_seen_at) sorted by distance ASC."""
+        ...
+
+    @abstractmethod
+    def get_jobs_by_uuids(self, uuids: list[str]) -> list[dict]:
+        """Return full job dicts for each uuid; output order matches input order."""
+        ...
+
+    @abstractmethod
+    def create_match_session(
+        self,
+        *,
+        user_id: str,
+        mode: str,
+        ranked_ids: list[str],
+        ttl_seconds: int = 7200,
+    ) -> str:
+        """Store ranked_ids, return new session_id."""
+        ...
+
+    @abstractmethod
+    def get_match_session(self, session_id: str, user_id: str) -> dict | None:
+        """Return {session_id, ranked_ids, total} or None if not found/expired."""
+        ...
+
     # === Users ===
 
     @abstractmethod

@@ -23,6 +23,8 @@ export default function ResumeTab() {
   const [computing, setComputing] = useState(false)
   const [ratingUuids, setRatingUuids] = useState<Set<string>>(new Set())
   const [filters, setFilters] = useState<Filters>({ minSimilarity: 0, maxDaysOld: null })
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [sessionOffset, setSessionOffset] = useState(0)
 
   const loadStats = useCallback(async () => {
     try {
@@ -34,14 +36,14 @@ export default function ResumeTab() {
   }, [])
 
   const loadJobs = useCallback(
-    async (append = false, offsetOverride?: number) => {
+    async (append = false) => {
       if (append) {
         setLoadingMore(true)
       } else {
         setLoading(true)
       }
       try {
-        const offset = append ? (offsetOverride ?? 0) : 0
+        const offset = append ? sessionOffset : 0
         const data = await matchesApi.get(
           'resume',
           true,
@@ -49,11 +51,16 @@ export default function ResumeTab() {
           offset,
           filters.minSimilarity / 100,
           filters.maxDaysOld ?? undefined,
+          true,
+          append ? (sessionId ?? undefined) : undefined,
         )
-        if (append) {
-          setJobs((prev) => [...prev, ...data.matches])
-        } else {
+        if (!append) {
+          setSessionId(data.session_id)
+          setSessionOffset(JOBS_PER_PAGE)
           setJobs(data.matches)
+        } else {
+          setSessionOffset((prev) => prev + JOBS_PER_PAGE)
+          setJobs((prev) => [...prev, ...data.matches])
         }
         setHasMore(data.has_more)
       } catch (err: any) {
@@ -63,7 +70,7 @@ export default function ResumeTab() {
         setLoadingMore(false)
       }
     },
-    [filters.minSimilarity, filters.maxDaysOld],
+    [filters.minSimilarity, filters.maxDaysOld, sessionId, sessionOffset],
   )
 
   useEffect(() => {
@@ -247,7 +254,11 @@ export default function ResumeTab() {
             or lower your filters above.
           </p>
           <button
-            onClick={() => loadJobs(false)}
+            onClick={() => {
+              setSessionId(null)
+              setSessionOffset(0)
+              loadJobs(false)
+            }}
             className="mt-4 px-5 py-2 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
           >
             Refresh
@@ -270,7 +281,7 @@ export default function ResumeTab() {
 
           <div className="text-center pt-2 flex flex-wrap justify-center gap-3">
             <button
-              onClick={() => loadJobs(true, jobs.length)}
+              onClick={() => loadJobs(true)}
               disabled={loadingMore || !hasMore}
               className="px-6 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium
                 hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed
@@ -281,7 +292,11 @@ export default function ResumeTab() {
               {loadingMore ? 'Loading…' : hasMore ? 'Load more' : 'No more matches'}
             </button>
             <button
-              onClick={() => loadJobs(false)}
+              onClick={() => {
+                setSessionId(null)
+                setSessionOffset(0)
+                loadJobs(false)
+              }}
               className="px-6 py-2.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium
                 hover:bg-gray-200 transition-colors"
             >

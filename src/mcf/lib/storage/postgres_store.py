@@ -10,17 +10,16 @@ The DATABASE_URL must be a libpq-style connection string, e.g.:
 from __future__ import annotations
 
 import json
-import logging
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Iterable, Sequence
 
 import psycopg2
 import psycopg2.extras
+from psycopg2 import pool as pg_pool
 from psycopg2.extras import execute_values
 
 from mcf.lib.storage.base import RunStats, Storage
-
-logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -32,16 +31,26 @@ class PostgresStore(Storage):
 
     def __init__(self, database_url: str) -> None:
         self._url = database_url
-        self._con = psycopg2.connect(database_url)
-        self._con.autocommit = True
+        self._pool = pg_pool.ThreadedConnectionPool(
+            minconn=1,
+            maxconn=8,
+            dsn=database_url,
+        )
         self._job_emb_select: str | None = None  # cached: "e.embedding_json" or "e.embedding::text"
         self._job_emb_has_vector: bool | None = None  # cached: True if embedding column exists
 
     def close(self) -> None:
-        self._con.close()
+        self._pool.closeall()
 
-    def _cur(self) -> psycopg2.extensions.cursor:
-        return self._con.cursor()
+    @contextmanager
+    def _cur(self):
+        conn = self._pool.getconn()
+        try:
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                yield cur
+        finally:
+            self._pool.putconn(conn)
 
     def _job_embedding_schema(self) -> tuple[str, bool]:
         """Return (select_expr, has_vector) for job_embeddings.
@@ -341,8 +350,6 @@ class PostgresStore(Storage):
     ) -> list[tuple[str, str, list[float], dict]]:
         emb_select, has_vector = self._job_embedding_schema()
 
-        logger.debug("get_active_job_embeddings limit=%s has_vector=%s", limit, has_vector)
-
         # Use pgvector similarity search when query_embedding, limit, and vector column exist
         if (
             query_embedding is not None
@@ -379,7 +386,6 @@ class PostgresStore(Storage):
                         "skills": json.loads(skills_json) if skills_json else [],
                     }
                     out.append((uuid, title or "", json.loads(emb_json), job_details))
-                logger.debug("get_active_job_embeddings vector_path rows_returned=%s", len(out))
                 return out
             except psycopg2.ProgrammingError:
                 pass  # Fall through to full scan
@@ -408,8 +414,102 @@ class PostgresStore(Storage):
                 "skills": json.loads(skills_json) if skills_json else [],
             }
             out.append((uuid, title or "", json.loads(emb_json), job_details))
-        logger.debug("get_active_job_embeddings full_scan_path rows_returned=%s", len(out))
         return out
+
+    def get_active_job_ids_ranked(
+        self,
+        query_embedding: Sequence[float],
+        limit: int = 5000,
+    ) -> list[tuple[str, float, datetime | None]]:
+        _, has_vector = self._job_embedding_schema()
+        if not has_vector:
+            return []
+        emb_str = json.dumps([float(x) for x in query_embedding])
+        with self._cur() as cur:
+            cur.execute(
+                """
+                SELECT j.job_uuid,
+                       (e.embedding <=> %s::vector) AS distance,
+                       j.last_seen_at
+                  FROM jobs j
+                  JOIN job_embeddings e ON e.job_uuid = j.job_uuid
+                 WHERE j.is_active = TRUE
+                   AND e.embedding IS NOT NULL
+                 ORDER BY distance ASC
+                 LIMIT %s
+                """,
+                [emb_str, limit],
+            )
+            rows = cur.fetchall()
+        return [(r[0], float(r[1]), r[2]) for r in rows]
+
+    def get_jobs_by_uuids(self, uuids: list[str]) -> list[dict]:
+        if not uuids:
+            return []
+        with self._cur() as cur:
+            cur.execute(
+                """
+                SELECT job_uuid, title, company_name, location, job_url, last_seen_at, skills_json
+                  FROM jobs WHERE job_uuid = ANY(%s)
+                """,
+                [uuids],
+            )
+            rows = cur.fetchall()
+        by_id = {
+            r[0]: {
+                "job_uuid": r[0],
+                "title": r[1] or "",
+                "company_name": r[2],
+                "location": r[3],
+                "job_url": r[4],
+                "last_seen_at": r[5],
+                "skills": json.loads(r[6]) if r[6] else [],
+            }
+            for r in rows
+        }
+        return [by_id[uid] for uid in uuids if uid in by_id]
+
+    def create_match_session(
+        self, *, user_id: str, mode: str, ranked_ids: list[str], ttl_seconds: int = 7200
+    ) -> str:
+        import secrets
+        from datetime import timedelta
+
+        session_id = secrets.token_urlsafe(16)
+        now = _utcnow()
+        expires_at = now + timedelta(seconds=ttl_seconds)
+        with self._cur() as cur:
+            cur.execute(
+                "DELETE FROM match_sessions WHERE user_id = %s AND expires_at < %s",
+                [user_id, now],
+            )
+            cur.execute(
+                """
+                INSERT INTO match_sessions(session_id, user_id, mode, ranked_ids, total, created_at, expires_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                [session_id, user_id, mode, json.dumps(ranked_ids), len(ranked_ids), now, expires_at],
+            )
+        return session_id
+
+    def get_match_session(self, session_id: str, user_id: str) -> dict | None:
+        with self._cur() as cur:
+            cur.execute(
+                """
+                SELECT session_id, ranked_ids, total
+                  FROM match_sessions
+                 WHERE session_id = %s AND user_id = %s AND expires_at > %s
+                """,
+                [session_id, user_id, _utcnow()],
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "session_id": row[0],
+            "ranked_ids": json.loads(row[1]),
+            "total": row[2],
+        }
 
     def get_all_active_jobs(self) -> list[dict]:
         with self._cur() as cur:

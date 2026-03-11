@@ -24,8 +24,6 @@ from mcf.lib.storage.base import Storage
 
 def _make_store() -> Storage:
     """Return a DuckDBStore or PostgresStore depending on DATABASE_URL."""
-    store_type = "PostgresStore" if settings.database_url else "DuckDBStore"
-    logging.info("store_selection database_url_set=%s store=%s", bool(settings.database_url), store_type)
     if settings.database_url:
         from mcf.lib.storage.postgres_store import PostgresStore
 
@@ -44,8 +42,6 @@ _store: Storage | None = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    import logging as _log
-    _log.basicConfig(level=getattr(_log, settings.log_level.upper(), _log.INFO))
     global _store
     _store = _make_store()
     yield
@@ -407,6 +403,7 @@ def get_matches(
     min_similarity: float = 0.0,
     max_days_old: int | None = None,
     mode: str = "resume",
+    session_id: str | None = None,
     user_id: str = Depends(get_current_user),
 ):
     """Get job matches for the current user.
@@ -444,7 +441,7 @@ def get_matches(
                     "then click Update Taste Profile."
                 ),
             )
-        matches, total = svc.match_taste_to_jobs(
+        matches, total, new_session_id = svc.match_taste_to_jobs(
             profile_id=profile_id,
             top_k=top_k,
             offset=offset,
@@ -452,10 +449,11 @@ def get_matches(
             user_id=user_id,
             min_similarity=min_similarity,
             max_days_old=max_days_old,
+            session_id=session_id,
         )
     else:
         # exclude_rated_only: only interested/not_interested (Discover). Else all interactions.
-        matches, total = svc.match_candidate_to_jobs(
+        matches, total, new_session_id = svc.match_candidate_to_jobs(
             profile_id=profile_id,
             top_k=top_k,
             offset=offset,
@@ -464,10 +462,17 @@ def get_matches(
             user_id=user_id,
             min_similarity=min_similarity,
             max_days_old=max_days_old,
+            session_id=session_id,
         )
 
     has_more = offset + len(matches) < total
-    return {"matches": matches, "total": total, "has_more": has_more, "mode": mode}
+    return {
+        "matches": matches,
+        "total": total,
+        "has_more": has_more,
+        "mode": mode,
+        "session_id": new_session_id,
+    }
 
 
 # ---------------------------------------------------------------------------

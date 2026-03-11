@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,8 +11,6 @@ from typing import Iterable, Sequence
 import duckdb
 
 from mcf.lib.storage.base import RunStats, Storage
-
-logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -190,6 +187,20 @@ class DuckDBStore(Storage):
         self._con.execute("CREATE INDEX IF NOT EXISTS idx_profiles_user ON candidate_profiles(user_id)")
         self._con.execute("CREATE INDEX IF NOT EXISTS idx_matches_profile ON matches(profile_id)")
         self._con.execute("CREATE INDEX IF NOT EXISTS idx_matches_job ON matches(job_uuid)")
+
+        self._con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS match_sessions (
+                session_id  TEXT PRIMARY KEY,
+                user_id     TEXT NOT NULL,
+                mode        TEXT NOT NULL,
+                ranked_ids  TEXT NOT NULL,
+                total       INTEGER NOT NULL,
+                created_at  TIMESTAMP,
+                expires_at  TIMESTAMP
+            )
+            """
+        )
 
         # Migration: add resume_storage_path column for Supabase Storage paths
         try:
@@ -397,8 +408,94 @@ class DuckDBStore(Storage):
                 "skills": json.loads(skills_json) if skills_json else [],
             }
             out.append((uuid, title or "", json.loads(emb_json), job_details))
-        logger.debug("get_active_job_embeddings rows_returned=%s limit_passed=%s", len(out), limit)
         return out
+
+    def get_active_job_ids_ranked(
+        self,
+        query_embedding: Sequence[float],
+        limit: int = 5000,
+    ) -> list[tuple[str, float, datetime | None]]:
+        import numpy as np
+
+        rows = self._con.execute(
+            """
+            SELECT j.job_uuid, e.embedding_json, j.last_seen_at
+              FROM jobs j
+              JOIN job_embeddings e ON e.job_uuid = j.job_uuid
+             WHERE j.is_active = TRUE
+            """
+        ).fetchall()
+        query_vec = np.array(query_embedding, dtype=np.float32)
+        scored = []
+        for uuid, emb_json, last_seen_at in rows:
+            emb = np.array(json.loads(emb_json), dtype=np.float32)
+            cosine_sim = float(np.dot(query_vec, emb))
+            distance = 1.0 - cosine_sim
+            scored.append((uuid, distance, last_seen_at))
+        scored.sort(key=lambda x: x[1])
+        return scored[:limit]
+
+    def get_jobs_by_uuids(self, uuids: list[str]) -> list[dict]:
+        if not uuids:
+            return []
+        placeholders = ", ".join("?" * len(uuids))
+        rows = self._con.execute(
+            f"SELECT job_uuid, title, company_name, location, job_url, last_seen_at, skills_json "
+            f"FROM jobs WHERE job_uuid IN ({placeholders})",
+            uuids,
+        ).fetchall()
+        by_id = {
+            r[0]: {
+                "job_uuid": r[0],
+                "title": r[1] or "",
+                "company_name": r[2],
+                "location": r[3],
+                "job_url": r[4],
+                "last_seen_at": r[5],
+                "skills": json.loads(r[6]) if r[6] else [],
+            }
+            for r in rows
+        }
+        return [by_id[uid] for uid in uuids if uid in by_id]
+
+    def create_match_session(
+        self, *, user_id: str, mode: str, ranked_ids: list[str], ttl_seconds: int = 7200
+    ) -> str:
+        import secrets
+        from datetime import timedelta
+
+        session_id = secrets.token_urlsafe(16)
+        now = _utcnow()
+        expires_at = now + timedelta(seconds=ttl_seconds)
+        self._con.execute(
+            "DELETE FROM match_sessions WHERE user_id = ? AND expires_at < ?",
+            [user_id, now],
+        )
+        self._con.execute(
+            """
+            INSERT INTO match_sessions(session_id, user_id, mode, ranked_ids, total, created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [session_id, user_id, mode, json.dumps(ranked_ids), len(ranked_ids), now, expires_at],
+        )
+        return session_id
+
+    def get_match_session(self, session_id: str, user_id: str) -> dict | None:
+        row = self._con.execute(
+            """
+            SELECT session_id, ranked_ids, total
+              FROM match_sessions
+             WHERE session_id = ? AND user_id = ? AND expires_at > ?
+            """,
+            [session_id, user_id, _utcnow()],
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "session_id": row[0],
+            "ranked_ids": json.loads(row[1]),
+            "total": row[2],
+        }
 
     def get_all_active_jobs(self) -> list[dict]:
         """Get all active jobs with stored metadata (for re-embedding).
