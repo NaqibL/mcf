@@ -168,6 +168,22 @@ class PostgresStore(Storage):
                 )
             return {r[0] for r in cur.fetchall()}
 
+    def get_job_uuids_needing_rich_backfill(self, limit: int | None = None) -> list[str]:
+        """Return MCF job UUIDs where categories_json is NULL or empty."""
+        with self._cur() as cur:
+            sql = """
+                SELECT job_uuid FROM jobs
+                WHERE (job_source = 'mcf' OR job_source IS NULL)
+                  AND (categories_json IS NULL OR categories_json = '' OR categories_json = '[]')
+                ORDER BY job_uuid
+            """
+            if limit is not None:
+                sql += " LIMIT %s"
+                cur.execute(sql, [limit])
+            else:
+                cur.execute(sql)
+            return [r[0] for r in cur.fetchall()]
+
     def record_statuses(
         self,
         run_id: str,

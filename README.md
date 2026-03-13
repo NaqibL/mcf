@@ -184,6 +184,26 @@ uv run mcf export-to-postgres --db data/mcf.duckdb --db-url $DATABASE_URL
 ```
 See [scripts/LOCAL_CRAWL_WORKFLOW.md](scripts/LOCAL_CRAWL_WORKFLOW.md) for the full workflow.
 
+**Backfill rich metadata (categories, employment type, salary):**
+
+After running migration `003_add_rich_job_fields.sql`, existing jobs have NULL in the new columns. Use the backfill command to fetch and populate them from the MCF API. Run locally (GitHub Actions may timeout for large datasets).
+
+```bash
+# Postgres (Supabase) — uses DATABASE_URL
+uv run mcf backfill-rich-fields
+
+# Batched run (e.g. 5000 jobs per run)
+uv run mcf backfill-rich-fields --limit 5000
+
+# DuckDB
+uv run mcf backfill-rich-fields --db data/mcf.duckdb
+
+# Slower rate limit if hitting API limits
+uv run mcf backfill-rich-fields --rate-limit 2
+```
+
+See [scripts/BACKFILL_README.md](scripts/BACKFILL_README.md) for details.
+
 ### API Endpoints
 
 - `GET /api/profile` - Get profile and resume status

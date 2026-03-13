@@ -16,6 +16,7 @@ from rich.progress import (
 )
 
 from mcf.api.services.matching_service import MatchingService
+from mcf.lib.api.client import MCFAPIError
 from mcf.lib.crawler.crawler import CrawlProgress
 from mcf.lib.embeddings.embedder import Embedder, EmbedderConfig
 from mcf.lib.embeddings.resume import extract_resume_text
@@ -171,6 +172,127 @@ def crawl_incremental(
         else:  # "all"
             _run_source(MCFJobSource(rate_limit=rate_limit), "MyCareersFuture", cats_arg=cats)
             _run_source(CareersGovJobSource(rate_limit=rate_limit), "Careers@Gov")
+    finally:
+        store.close()
+
+
+@app.command("backfill-rich-fields")
+def backfill_rich_fields(
+    db: Annotated[
+        Optional[Path],
+        typer.Option("--db", help="DuckDB file path (default: data/mcf.duckdb)"),
+    ] = None,
+    db_url: Annotated[
+        Optional[str],
+        typer.Option("--db-url", help="PostgreSQL connection URL (overrides --db)", envvar="DATABASE_URL"),
+    ] = None,
+    rate_limit: Annotated[
+        float,
+        typer.Option(
+            "--rate-limit",
+            "-r",
+            help="API requests per second (default: 4)",
+        ),
+    ] = 4.0,
+    limit: Annotated[
+        Optional[int],
+        typer.Option(
+            "--limit",
+            "-l",
+            help="Maximum number of jobs to backfill (for batched runs)",
+        ),
+    ] = None,
+) -> None:
+    """Backfill rich metadata (categories, employment type, salary, etc.) for existing MCF jobs.
+
+    Fetches job details from the MCF API and updates jobs that have NULL categories_json.
+    Run locally; large datasets may take hours. Use --limit for batched runs.
+    """
+    store, db_display = _open_store(db, db_url)
+
+    try:
+        job_uuids = store.get_job_uuids_needing_rich_backfill(limit=limit)
+        if not job_uuids:
+            console.print("[bold green]No jobs need backfill.[/bold green]")
+            return
+
+        console.print(f"[bold cyan]Backfill Rich Fields[/bold cyan]")
+        console.print(f"  Storage: [green]{db_display}[/green]")
+        console.print(f"  Jobs to backfill: [yellow]{len(job_uuids):,}[/yellow]")
+        console.print(f"  Rate limit: [yellow]{rate_limit}[/yellow] req/s")
+        if limit:
+            console.print(f"  Limit: [yellow]{limit}[/yellow] (batched run)")
+        console.print()
+
+        run = store.begin_run(kind="backfill", categories=None)
+        source = MCFJobSource(rate_limit=rate_limit)
+
+        ok = 0
+        failed = 0
+        skipped = 0
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TextColumn("•"),
+            TimeElapsedColumn(),
+            TextColumn("•"),
+            TimeRemainingColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("[cyan]Backfilling...", total=len(job_uuids))
+
+            for job_uuid in job_uuids:
+                try:
+                    normalized = source.get_job_detail(job_uuid)
+                    store.upsert_new_job_detail(
+                        run_id=run.run_id,
+                        job_uuid=job_uuid,
+                        title=normalized.title,
+                        company_name=normalized.company_name,
+                        location=normalized.location,
+                        job_url=normalized.job_url,
+                        job_source=normalized.source_id,
+                        skills=normalized.skills or None,
+                        raw_json=None,
+                        categories=normalized.categories or None,
+                        employment_types=normalized.employment_types or None,
+                        position_levels=normalized.position_levels or None,
+                        salary_min=normalized.salary_min,
+                        salary_max=normalized.salary_max,
+                        posted_date=normalized.posted_date,
+                        expiry_date=normalized.expiry_date,
+                        min_years_experience=normalized.min_years_experience,
+                    )
+                    ok += 1
+                except MCFAPIError as e:
+                    if e.status_code == 404:
+                        skipped += 1  # Job removed from MCF
+                    else:
+                        failed += 1
+                        progress.console.print(f"[yellow]Warning: {job_uuid}: {e}[/yellow]")
+                except Exception as e:
+                    failed += 1
+                    progress.console.print(f"[yellow]Warning: {job_uuid}: {e}[/yellow]")
+
+                progress.advance(task)
+
+        store.update_daily_stats(run.run_id)
+        store.finish_run(
+            run.run_id,
+            total_seen=len(job_uuids),
+            added=ok,
+            maintained=0,
+            removed=skipped,
+        )
+
+        console.print()
+        console.print("[bold green]Backfill complete[/bold green]")
+        console.print(f"  Updated: [cyan]{ok:,}[/cyan]")
+        console.print(f"  Skipped (404): [yellow]{skipped:,}[/yellow]")
+        console.print(f"  Failed: [red]{failed:,}[/red]")
     finally:
         store.close()
 

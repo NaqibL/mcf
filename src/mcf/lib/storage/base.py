@@ -103,6 +103,11 @@ class Storage(ABC):
         Returns count of deleted rows."""
         ...
 
+    def get_job_uuids_needing_rich_backfill(self, limit: int | None = None) -> list[str]:
+        """Return MCF job UUIDs where categories_json is NULL or empty (need backfill).
+        Used by backfill-rich-fields to populate rich metadata from the MCF API."""
+        raise NotImplementedError
+
     @abstractmethod
     def get_job(self, job_uuid: str) -> dict | None: ...
 
