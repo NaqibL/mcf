@@ -82,7 +82,26 @@ class Storage(ABC):
         job_source: str = "mcf",
         skills: list[str] | None = None,
         raw_json: dict | None = None,
+        categories: list[str] | None = None,
+        employment_types: list[str] | None = None,
+        position_levels: list[str] | None = None,
+        salary_min: int | None = None,
+        salary_max: int | None = None,
+        posted_date: str | None = None,
+        expiry_date: str | None = None,
+        min_years_experience: int | None = None,
     ) -> None: ...
+
+    @abstractmethod
+    def update_daily_stats(self, run_id: str) -> None:
+        """Recompute job_daily_stats for today from the current active job roster."""
+        ...
+
+    @abstractmethod
+    def delete_inactive_job_embeddings(self) -> int:
+        """Delete embeddings for inactive jobs with no user interactions.
+        Returns count of deleted rows."""
+        ...
 
     @abstractmethod
     def get_job(self, job_uuid: str) -> dict | None: ...
@@ -251,6 +270,18 @@ class Storage(ABC):
 
     @abstractmethod
     def get_jobs_by_location(self, limit: int = 20) -> list[dict]: ...
+
+    @abstractmethod
+    def get_jobs_by_category(self, limit_days: int = 90, limit: int = 30) -> list[dict]: ...
+
+    @abstractmethod
+    def get_jobs_by_employment_type(self, limit_days: int = 90, limit: int = 20) -> list[dict]: ...
+
+    @abstractmethod
+    def get_jobs_by_position_level(self, limit_days: int = 90, limit: int = 20) -> list[dict]: ...
+
+    @abstractmethod
+    def get_salary_distribution(self) -> list[dict]: ...
 
     def reset_profile_ratings(self, user_id: str) -> dict:
         """Reset job interactions and taste profile for a user (for testing).

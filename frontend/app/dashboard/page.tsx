@@ -7,6 +7,9 @@ import {
   Area,
   BarChart,
   Bar,
+  PieChart,
+  Pie,
+  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -45,25 +48,39 @@ function DashboardContent() {
   const [crawlRuns, setCrawlRuns] = useState<CrawlRun[]>([])
   const [topCompanies, setTopCompanies] = useState<Array<{ company_name: string; count: number }>>([])
   const [jobsByLocation, setJobsByLocation] = useState<Array<{ location: string; count: number }>>([])
+  const [jobsByCategory, setJobsByCategory] = useState<Array<{ category: string; count: number }>>([])
+  const [jobsByEmploymentType, setJobsByEmploymentType] = useState<Array<{ employment_type: string; count: number }>>([])
+  const [jobsByPositionLevel, setJobsByPositionLevel] = useState<Array<{ position_level: string; count: number }>>([])
+  const [salaryDistribution, setSalaryDistribution] = useState<Array<{ bucket: string; count: number }>>([])
   const [loading, setLoading] = useState(true)
   const [limitDays, setLimitDays] = useState(90)
+
+  const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
 
   useEffect(() => {
     const load = async () => {
       setLoading(true)
       try {
-        const [s, j, c, tc, jbl] = await Promise.all([
+        const [s, j, c, tc, jbl, jbc, jbet, jbpl, sd] = await Promise.all([
           dashboardApi.getSummary(),
           dashboardApi.getJobsOverTime(limitDays),
           dashboardApi.getCrawlRuns(50),
           dashboardApi.getTopCompanies(20),
           dashboardApi.getJobsByLocation(20),
+          dashboardApi.getJobsByCategory(limitDays, 30),
+          dashboardApi.getJobsByEmploymentType(limitDays, 20),
+          dashboardApi.getJobsByPositionLevel(limitDays, 20),
+          dashboardApi.getSalaryDistribution(),
         ])
         setSummary(s)
         setJobsOverTime(j)
         setCrawlRuns(c)
         setTopCompanies(tc)
         setJobsByLocation(jbl)
+        setJobsByCategory(jbc)
+        setJobsByEmploymentType(jbet)
+        setJobsByPositionLevel(jbpl)
+        setSalaryDistribution(sd)
       } catch (err: unknown) {
         toast.error('Failed to load dashboard. Is the API server running?')
       } finally {
@@ -143,10 +160,10 @@ function DashboardContent() {
           </div>
         </section>
 
-        {/* Jobs over time */}
+        {/* Jobs over time (first crawled date) */}
         <section>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Jobs over time</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Jobs over time (first crawled date)</h2>
             <select
               value={limitDays}
               onChange={(e) => setLimitDays(Number(e.target.value))}
@@ -223,6 +240,89 @@ function DashboardContent() {
             </ResponsiveContainer>
           </div>
         </section>
+
+        {/* Jobs by category */}
+        <section>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Jobs by category (MCF industry)</h2>
+          <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm h-96">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={jobsByCategory} layout="vertical" margin={{ left: 120, right: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis type="number" fontSize={11} />
+                <YAxis
+                  type="category"
+                  dataKey="category"
+                  width={115}
+                  fontSize={10}
+                  tick={{ fontSize: 9 }}
+                />
+                <Tooltip formatter={(value: number) => [value.toLocaleString(), 'Jobs']} />
+                <Bar dataKey="count" name="Jobs" fill="#6366f1" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+
+        {/* Employment type & Position level & Salary */}
+        <div className="grid md:grid-cols-3 gap-8">
+          <section>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Employment type</h2>
+            <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={jobsByEmploymentType}
+                    dataKey="count"
+                    nameKey="employment_type"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={80}
+                    paddingAngle={2}
+                    label={({ employment_type, percent }) =>
+                      percent ? `${employment_type} ${(percent * 100).toFixed(0)}%` : employment_type
+                    }
+                  >
+                    {jobsByEmploymentType.map((_, i) => (
+                      <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value: number) => [value.toLocaleString(), 'Jobs']} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+
+          <section>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Position level</h2>
+            <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={jobsByPositionLevel} layout="vertical" margin={{ left: 70, right: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis type="number" fontSize={11} />
+                  <YAxis type="category" dataKey="position_level" width={65} fontSize={10} />
+                  <Tooltip formatter={(value: number) => [value.toLocaleString(), 'Jobs']} />
+                  <Bar dataKey="count" name="Jobs" fill="#0ea5e9" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+
+          <section>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Salary distribution (min)</h2>
+            <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={salaryDistribution} margin={{ left: 10, right: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="bucket" fontSize={11} />
+                  <YAxis fontSize={11} />
+                  <Tooltip formatter={(value: number) => [value.toLocaleString(), 'Jobs']} />
+                  <Bar dataKey="count" name="Jobs" fill="#10b981" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+        </div>
 
         {/* Top companies & Jobs by location */}
         <div className="grid md:grid-cols-2 gap-8">

@@ -194,6 +194,46 @@ def get_dashboard_jobs_by_location(
     return store.get_jobs_by_location(limit=limit)
 
 
+@app.get("/api/dashboard/jobs-by-category")
+def get_dashboard_jobs_by_category(
+    limit_days: int = Query(default=90, ge=1, le=365),
+    limit: int = Query(default=30, ge=1, le=50),
+    user_id: str = Depends(get_current_user),
+):
+    """Return job counts by MCF category (from job_daily_stats)."""
+    store = get_store()
+    return store.get_jobs_by_category(limit_days=limit_days, limit=limit)
+
+
+@app.get("/api/dashboard/jobs-by-employment-type")
+def get_dashboard_jobs_by_employment_type(
+    limit_days: int = Query(default=90, ge=1, le=365),
+    limit: int = Query(default=20, ge=1, le=50),
+    user_id: str = Depends(get_current_user),
+):
+    """Return job counts by employment type (from job_daily_stats)."""
+    store = get_store()
+    return store.get_jobs_by_employment_type(limit_days=limit_days, limit=limit)
+
+
+@app.get("/api/dashboard/jobs-by-position-level")
+def get_dashboard_jobs_by_position_level(
+    limit_days: int = Query(default=90, ge=1, le=365),
+    limit: int = Query(default=20, ge=1, le=50),
+    user_id: str = Depends(get_current_user),
+):
+    """Return job counts by position level (from job_daily_stats)."""
+    store = get_store()
+    return store.get_jobs_by_position_level(limit_days=limit_days, limit=limit)
+
+
+@app.get("/api/dashboard/salary-distribution")
+def get_dashboard_salary_distribution(user_id: str = Depends(get_current_user)):
+    """Return salary distribution buckets (from jobs.salary_min)."""
+    store = get_store()
+    return store.get_salary_distribution()
+
+
 # ---------------------------------------------------------------------------
 # Profile endpoints
 # ---------------------------------------------------------------------------

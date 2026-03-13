@@ -51,6 +51,42 @@ def _mcf_raw_to_normalized(raw: dict, external_id: str) -> NormalizedJob:
 
     skills = _extract_mcf_skills(raw)
 
+    categories = [
+        c["category"]
+        for c in raw.get("categories", [])
+        if isinstance(c, dict) and c.get("category")
+    ]
+    employment_types = [
+        e["employmentType"]
+        for e in raw.get("employmentTypes", [])
+        if isinstance(e, dict) and e.get("employmentType")
+    ]
+    position_levels = [
+        p["position"]
+        for p in raw.get("positionLevels", [])
+        if isinstance(p, dict) and p.get("position")
+    ]
+
+    salary = raw.get("salary") or {}
+    salary_min = salary.get("minimum") if isinstance(salary, dict) else None
+    salary_max = salary.get("maximum") if isinstance(salary, dict) else None
+    if salary_min is not None:
+        salary_min = int(salary_min)
+    if salary_max is not None:
+        salary_max = int(salary_max)
+
+    metadata_dict = raw.get("metadata") or {}
+    posted_date = None
+    if metadata_dict.get("newPostingDate"):
+        posted_date = str(metadata_dict.get("newPostingDate", ""))[:10]
+    expiry_date = None
+    if metadata_dict.get("expiryDate"):
+        expiry_date = str(metadata_dict.get("expiryDate", ""))[:10]
+
+    min_years_experience = raw.get("minimumYearsExperience")
+    if min_years_experience is not None:
+        min_years_experience = int(min_years_experience)
+
     return NormalizedJob(
         source_id="mcf",
         external_id=external_id,
@@ -60,6 +96,14 @@ def _mcf_raw_to_normalized(raw: dict, external_id: str) -> NormalizedJob:
         job_url=job_url,
         skills=skills,
         description_snippet=description_snippet,
+        categories=categories,
+        employment_types=employment_types,
+        position_levels=position_levels,
+        salary_min=salary_min,
+        salary_max=salary_max,
+        posted_date=posted_date or None,
+        expiry_date=expiry_date or None,
+        min_years_experience=min_years_experience,
     )
 
 

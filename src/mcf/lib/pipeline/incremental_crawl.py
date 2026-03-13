@@ -93,6 +93,14 @@ def run_incremental_crawl(
                     job_source=normalized.source_id,
                     skills=normalized.skills or None,
                     raw_json=None,
+                    categories=normalized.categories or None,
+                    employment_types=normalized.employment_types or None,
+                    position_levels=normalized.position_levels or None,
+                    salary_min=normalized.salary_min,
+                    salary_max=normalized.salary_max,
+                    posted_date=normalized.posted_date,
+                    expiry_date=normalized.expiry_date,
+                    min_years_experience=normalized.min_years_experience,
                 )
 
                 if job_text:
@@ -114,6 +122,8 @@ def run_incremental_crawl(
                     for normalized, _ in batch:
                         print(f"Warning: Failed to generate embedding for job {normalized.job_uuid}: {e}")
 
+        store.update_daily_stats(run.run_id)
+        store.delete_inactive_job_embeddings()
         store.finish_run(
             run.run_id,
             total_seen=len(seen_set),

@@ -226,30 +226,53 @@ class PostgresStore(Storage):
         job_source: str = "mcf",
         skills: list[str] | None = None,
         raw_json: dict | None = None,
+        categories: list[str] | None = None,
+        employment_types: list[str] | None = None,
+        position_levels: list[str] | None = None,
+        salary_min: int | None = None,
+        salary_max: int | None = None,
+        posted_date: str | None = None,
+        expiry_date: str | None = None,
+        min_years_experience: int | None = None,
     ) -> None:
         now = _utcnow()
         skills_json_str = json.dumps(skills) if skills else None
+        categories_json_str = json.dumps(categories) if categories else None
+        employment_types_json_str = json.dumps(employment_types) if employment_types else None
+        position_levels_json_str = json.dumps(position_levels) if position_levels else None
         with self._cur() as cur:
             cur.execute(
                 """
                 INSERT INTO jobs(job_uuid, job_source, first_seen_run_id, last_seen_run_id,
                                  is_active, first_seen_at, last_seen_at,
-                                 title, company_name, location, job_url, skills_json)
-                VALUES (%s, %s, %s, %s, TRUE, %s, %s, %s, %s, %s, %s, %s)
+                                 title, company_name, location, job_url, skills_json,
+                                 categories_json, employment_types_json, position_levels_json,
+                                 salary_min, salary_max, posted_date, expiry_date, min_years_experience)
+                VALUES (%s, %s, %s, %s, TRUE, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (job_uuid) DO UPDATE SET
-                  job_source       = COALESCE(EXCLUDED.job_source, jobs.job_source),
-                  last_seen_run_id = EXCLUDED.last_seen_run_id,
-                  is_active        = TRUE,
-                  last_seen_at     = EXCLUDED.last_seen_at,
-                  title            = COALESCE(EXCLUDED.title, jobs.title),
-                  company_name     = COALESCE(EXCLUDED.company_name, jobs.company_name),
-                  location         = COALESCE(EXCLUDED.location, jobs.location),
-                  job_url          = COALESCE(EXCLUDED.job_url, jobs.job_url),
-                  skills_json      = COALESCE(EXCLUDED.skills_json, jobs.skills_json)
+                  job_source            = COALESCE(EXCLUDED.job_source, jobs.job_source),
+                  last_seen_run_id      = EXCLUDED.last_seen_run_id,
+                  is_active             = TRUE,
+                  last_seen_at          = EXCLUDED.last_seen_at,
+                  title                 = COALESCE(EXCLUDED.title, jobs.title),
+                  company_name          = COALESCE(EXCLUDED.company_name, jobs.company_name),
+                  location              = COALESCE(EXCLUDED.location, jobs.location),
+                  job_url               = COALESCE(EXCLUDED.job_url, jobs.job_url),
+                  skills_json           = COALESCE(EXCLUDED.skills_json, jobs.skills_json),
+                  categories_json       = COALESCE(EXCLUDED.categories_json, jobs.categories_json),
+                  employment_types_json = COALESCE(EXCLUDED.employment_types_json, jobs.employment_types_json),
+                  position_levels_json  = COALESCE(EXCLUDED.position_levels_json, jobs.position_levels_json),
+                  salary_min            = COALESCE(EXCLUDED.salary_min, jobs.salary_min),
+                  salary_max            = COALESCE(EXCLUDED.salary_max, jobs.salary_max),
+                  posted_date           = COALESCE(EXCLUDED.posted_date, jobs.posted_date),
+                  expiry_date           = COALESCE(EXCLUDED.expiry_date, jobs.expiry_date),
+                  min_years_experience  = COALESCE(EXCLUDED.min_years_experience, jobs.min_years_experience)
                 """,
                 [
                     job_uuid, job_source, run_id, run_id,
                     now, now, title, company_name, location, job_url, skills_json_str,
+                    categories_json_str, employment_types_json_str, position_levels_json_str,
+                    salary_min, salary_max, posted_date, expiry_date, min_years_experience,
                 ],
             )
 
@@ -984,6 +1007,135 @@ class PostgresStore(Storage):
             )
             rows = cur.fetchall()
         return [{"location": r[0], "count": r[1]} for r in rows]
+
+    def update_daily_stats(self, run_id: str) -> None:
+        """Upsert today's aggregated stats by category x employment_type x position_level."""
+        today = _utcnow().date()
+        with self._cur() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO job_daily_stats
+                        (stat_date, category, employment_type, position_level, active_count, added_count, removed_count)
+                    SELECT
+                        %s AS stat_date,
+                        COALESCE(
+                            NULLIF(TRIM(BOTH '"' FROM (j.categories_json::jsonb->0)::text), ''),
+                            'Unknown'
+                        ) AS category,
+                        COALESCE(
+                            NULLIF(TRIM(BOTH '"' FROM (j.employment_types_json::jsonb->0)::text), ''),
+                            'Unknown'
+                        ) AS employment_type,
+                        COALESCE(
+                            NULLIF(TRIM(BOTH '"' FROM (j.position_levels_json::jsonb->0)::text), ''),
+                            'Unknown'
+                        ) AS position_level,
+                        COUNT(*) FILTER (WHERE j.is_active = TRUE) AS active_count,
+                        COUNT(*) FILTER (WHERE jrs.status = 'added') AS added_count,
+                        COUNT(*) FILTER (WHERE jrs.status = 'removed') AS removed_count
+                    FROM jobs j
+                    LEFT JOIN job_run_status jrs ON jrs.job_uuid = j.job_uuid AND jrs.run_id = %s
+                    GROUP BY 2, 3, 4
+                    ON CONFLICT (stat_date, category, employment_type, position_level)
+                    DO UPDATE SET
+                        active_count  = EXCLUDED.active_count,
+                        added_count   = EXCLUDED.added_count,
+                        removed_count = EXCLUDED.removed_count
+                    """,
+                    [today, run_id],
+                )
+
+    def delete_inactive_job_embeddings(self) -> int:
+        """Delete embeddings for inactive jobs that no user has ever interacted with."""
+        with self._cur() as cur:
+            cur.execute(
+                """
+                DELETE FROM job_embeddings
+                WHERE job_uuid IN (
+                    SELECT e.job_uuid
+                      FROM job_embeddings e
+                      JOIN jobs j ON j.job_uuid = e.job_uuid
+                     WHERE j.is_active = FALSE
+                       AND NOT EXISTS (
+                             SELECT 1 FROM job_interactions i
+                              WHERE i.job_uuid = e.job_uuid
+                           )
+                )
+                """
+            )
+            return cur.rowcount
+
+    def get_jobs_by_category(self, limit_days: int = 90, limit: int = 30) -> list[dict]:
+        with self._cur() as cur:
+            cur.execute(
+                """
+                SELECT category, SUM(active_count)::int AS count
+                FROM job_daily_stats
+                WHERE stat_date >= CURRENT_DATE - %s::int
+                GROUP BY category
+                ORDER BY count DESC
+                LIMIT %s
+                """,
+                [limit_days, limit],
+            )
+            rows = cur.fetchall()
+        return [{"category": r[0], "count": r[1]} for r in rows]
+
+    def get_jobs_by_employment_type(self, limit_days: int = 90, limit: int = 20) -> list[dict]:
+        with self._cur() as cur:
+            cur.execute(
+                """
+                SELECT employment_type, SUM(active_count)::int AS count
+                FROM job_daily_stats
+                WHERE stat_date >= CURRENT_DATE - %s::int
+                GROUP BY employment_type
+                ORDER BY count DESC
+                LIMIT %s
+                """,
+                [limit_days, limit],
+            )
+            rows = cur.fetchall()
+        return [{"employment_type": r[0], "count": r[1]} for r in rows]
+
+    def get_jobs_by_position_level(self, limit_days: int = 90, limit: int = 20) -> list[dict]:
+        with self._cur() as cur:
+            cur.execute(
+                """
+                SELECT position_level, SUM(active_count)::int AS count
+                FROM job_daily_stats
+                WHERE stat_date >= CURRENT_DATE - %s::int
+                GROUP BY position_level
+                ORDER BY count DESC
+                LIMIT %s
+                """,
+                [limit_days, limit],
+            )
+            rows = cur.fetchall()
+        return [{"position_level": r[0], "count": r[1]} for r in rows]
+
+    def get_salary_distribution(self) -> list[dict]:
+        bucket_order = ["$0-2k", "$2k-4k", "$4k-6k", "$6k-8k", "$8k+", "Not disclosed"]
+        with self._cur() as cur:
+            cur.execute(
+                """
+                SELECT
+                    CASE
+                        WHEN salary_min IS NULL THEN 'Not disclosed'
+                        WHEN salary_min < 2000 THEN '$0-2k'
+                        WHEN salary_min < 4000 THEN '$2k-4k'
+                        WHEN salary_min < 6000 THEN '$4k-6k'
+                        WHEN salary_min < 8000 THEN '$6k-8k'
+                        ELSE '$8k+'
+                    END AS bucket,
+                    COUNT(*)::int AS count
+                FROM jobs
+                WHERE is_active = TRUE
+                GROUP BY 1
+                """
+            )
+            rows = cur.fetchall()
+        by_bucket = {r[0]: r[1] for r in rows}
+        return [{"bucket": b, "count": by_bucket.get(b, 0)} for b in bucket_order]
 
     # === Match recording ===
 

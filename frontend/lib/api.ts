@@ -178,4 +178,26 @@ export const dashboardApi = {
     })
     return response.data as Array<{ location: string; count: number }>
   },
+  getJobsByCategory: async (limitDays = 90, limit = 30) => {
+    const response = await api.get('/api/dashboard/jobs-by-category', {
+      params: { limit_days: limitDays, limit },
+    })
+    return response.data as Array<{ category: string; count: number }>
+  },
+  getJobsByEmploymentType: async (limitDays = 90, limit = 20) => {
+    const response = await api.get('/api/dashboard/jobs-by-employment-type', {
+      params: { limit_days: limitDays, limit },
+    })
+    return response.data as Array<{ employment_type: string; count: number }>
+  },
+  getJobsByPositionLevel: async (limitDays = 90, limit = 20) => {
+    const response = await api.get('/api/dashboard/jobs-by-position-level', {
+      params: { limit_days: limitDays, limit },
+    })
+    return response.data as Array<{ position_level: string; count: number }>
+  },
+  getSalaryDistribution: async () => {
+    const response = await api.get('/api/dashboard/salary-distribution')
+    return response.data as Array<{ bucket: string; count: number }>
+  },
 }

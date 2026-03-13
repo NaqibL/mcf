@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, Sequence
 
 
@@ -22,6 +22,14 @@ class NormalizedJob:
     job_url: str | None
     skills: list[str]
     description_snippet: str | None
+    categories: list[str] = field(default_factory=list)
+    employment_types: list[str] = field(default_factory=list)
+    position_levels: list[str] = field(default_factory=list)
+    salary_min: int | None = None
+    salary_max: int | None = None
+    posted_date: str | None = None
+    expiry_date: str | None = None
+    min_years_experience: int | None = None
 
     @property
     def job_uuid(self) -> str:

@@ -107,6 +107,14 @@ class DuckDBStore(Storage):
             "ALTER TABLE jobs ADD COLUMN job_url TEXT",
             "ALTER TABLE jobs ADD COLUMN skills_json TEXT",
             "ALTER TABLE jobs ADD COLUMN job_source TEXT DEFAULT 'mcf'",
+            "ALTER TABLE jobs ADD COLUMN categories_json TEXT",
+            "ALTER TABLE jobs ADD COLUMN employment_types_json TEXT",
+            "ALTER TABLE jobs ADD COLUMN position_levels_json TEXT",
+            "ALTER TABLE jobs ADD COLUMN salary_min INTEGER",
+            "ALTER TABLE jobs ADD COLUMN salary_max INTEGER",
+            "ALTER TABLE jobs ADD COLUMN posted_date DATE",
+            "ALTER TABLE jobs ADD COLUMN expiry_date DATE",
+            "ALTER TABLE jobs ADD COLUMN min_years_experience INTEGER",
             # candidate_embeddings: support multiple embedding types per profile
             # (taste embedding stored with profile_id suffix ':taste')
             "ALTER TABLE candidate_embeddings ADD COLUMN embedding_type TEXT DEFAULT 'resume'",
@@ -187,6 +195,21 @@ class DuckDBStore(Storage):
         self._con.execute("CREATE INDEX IF NOT EXISTS idx_profiles_user ON candidate_profiles(user_id)")
         self._con.execute("CREATE INDEX IF NOT EXISTS idx_matches_profile ON matches(profile_id)")
         self._con.execute("CREATE INDEX IF NOT EXISTS idx_matches_job ON matches(job_uuid)")
+
+        self._con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS job_daily_stats (
+                stat_date       DATE NOT NULL,
+                category        TEXT NOT NULL,
+                employment_type TEXT NOT NULL DEFAULT 'Unknown',
+                position_level  TEXT NOT NULL DEFAULT 'Unknown',
+                active_count    INTEGER NOT NULL DEFAULT 0,
+                added_count     INTEGER NOT NULL DEFAULT 0,
+                removed_count   INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (stat_date, category, employment_type, position_level)
+            )
+            """
+        )
 
         self._con.execute(
             """
@@ -289,15 +312,28 @@ class DuckDBStore(Storage):
         job_source: str = "mcf",
         skills: list[str] | None = None,
         raw_json: dict | None = None,
+        categories: list[str] | None = None,
+        employment_types: list[str] | None = None,
+        position_levels: list[str] | None = None,
+        salary_min: int | None = None,
+        salary_max: int | None = None,
+        posted_date: str | None = None,
+        expiry_date: str | None = None,
+        min_years_experience: int | None = None,
     ) -> None:
         now = _utcnow()
         skills_json_str = json.dumps(skills) if skills else None
+        categories_json_str = json.dumps(categories) if categories else None
+        employment_types_json_str = json.dumps(employment_types) if employment_types else None
+        position_levels_json_str = json.dumps(position_levels) if position_levels else None
         self._con.execute(
             """
             INSERT INTO jobs(job_uuid, job_source, first_seen_run_id, last_seen_run_id, is_active,
                              first_seen_at, last_seen_at,
-                             title, company_name, location, job_url, skills_json)
-            VALUES (?, ?, ?, ?, TRUE, ?, ?, ?, ?, ?, ?, ?)
+                             title, company_name, location, job_url, skills_json,
+                             categories_json, employment_types_json, position_levels_json,
+                             salary_min, salary_max, posted_date, expiry_date, min_years_experience)
+            VALUES (?, ?, ?, ?, TRUE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (job_uuid) DO UPDATE SET
               job_source = COALESCE(excluded.job_source, jobs.job_source),
               last_seen_run_id = excluded.last_seen_run_id,
@@ -307,7 +343,15 @@ class DuckDBStore(Storage):
               company_name = COALESCE(excluded.company_name, jobs.company_name),
               location = COALESCE(excluded.location, jobs.location),
               job_url = COALESCE(excluded.job_url, jobs.job_url),
-              skills_json = COALESCE(excluded.skills_json, jobs.skills_json)
+              skills_json = COALESCE(excluded.skills_json, jobs.skills_json),
+              categories_json = COALESCE(excluded.categories_json, jobs.categories_json),
+              employment_types_json = COALESCE(excluded.employment_types_json, jobs.employment_types_json),
+              position_levels_json = COALESCE(excluded.position_levels_json, jobs.position_levels_json),
+              salary_min = COALESCE(excluded.salary_min, jobs.salary_min),
+              salary_max = COALESCE(excluded.salary_max, jobs.salary_max),
+              posted_date = COALESCE(excluded.posted_date, jobs.posted_date),
+              expiry_date = COALESCE(excluded.expiry_date, jobs.expiry_date),
+              min_years_experience = COALESCE(excluded.min_years_experience, jobs.min_years_experience)
             """,
             [
                 job_uuid,
@@ -321,6 +365,14 @@ class DuckDBStore(Storage):
                 location,
                 job_url,
                 skills_json_str,
+                categories_json_str,
+                employment_types_json_str,
+                position_levels_json_str,
+                salary_min,
+                salary_max,
+                posted_date,
+                expiry_date,
+                min_years_experience,
             ],
         )
 
@@ -1045,6 +1097,147 @@ class DuckDBStore(Storage):
             [limit],
         ).fetchall()
         return [{"location": r[0], "count": r[1]} for r in rows]
+
+    def update_daily_stats(self, run_id: str) -> None:
+        """Upsert today's aggregated stats by category x employment_type x position_level."""
+        today = _utcnow().date()
+        try:
+            rows = self._con.execute(
+                """
+                SELECT j.job_uuid, j.is_active, j.categories_json, j.employment_types_json, j.position_levels_json,
+                       jrs.status
+                FROM jobs j
+                LEFT JOIN job_run_status jrs ON jrs.job_uuid = j.job_uuid AND jrs.run_id = ?
+                """,
+                [run_id],
+            ).fetchall()
+        except duckdb.ProgrammingError:
+            return
+        agg: dict[tuple[str, str, str], dict[str, int]] = {}
+        for job_uuid, is_active, cat_json, et_json, pl_json, status in rows:
+            cats = json.loads(cat_json) if cat_json else []
+            ets = json.loads(et_json) if et_json else []
+            pls = json.loads(pl_json) if pl_json else []
+            cat = (cats[0] if cats else "Unknown").strip() or "Unknown"
+            et = (ets[0] if ets else "Unknown").strip() or "Unknown"
+            pl = (pls[0] if pls else "Unknown").strip() or "Unknown"
+            key = (cat, et, pl)
+            if key not in agg:
+                agg[key] = {"active_count": 0, "added_count": 0, "removed_count": 0}
+            if is_active:
+                agg[key]["active_count"] += 1
+            if status == "added":
+                agg[key]["added_count"] += 1
+            elif status == "removed":
+                agg[key]["removed_count"] += 1
+        for (cat, et, pl), counts in agg.items():
+            self._con.execute(
+                """
+                INSERT INTO job_daily_stats(stat_date, category, employment_type, position_level,
+                    active_count, added_count, removed_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (stat_date, category, employment_type, position_level)
+                DO UPDATE SET
+                    active_count = EXCLUDED.active_count,
+                    added_count = EXCLUDED.added_count,
+                    removed_count = EXCLUDED.removed_count
+                """,
+                [today, cat, et, pl, counts["active_count"], counts["added_count"], counts["removed_count"]],
+            )
+
+    def delete_inactive_job_embeddings(self) -> int:
+        """Delete embeddings for inactive jobs that no user has ever interacted with."""
+        rows = self._con.execute(
+            """
+            SELECT e.job_uuid
+            FROM job_embeddings e
+            JOIN jobs j ON j.job_uuid = e.job_uuid
+            WHERE j.is_active = FALSE
+              AND NOT EXISTS (SELECT 1 FROM job_interactions i WHERE i.job_uuid = e.job_uuid)
+            """
+        ).fetchall()
+        uuids = [r[0] for r in rows]
+        if not uuids:
+            return 0
+        placeholders = ", ".join("?" for _ in uuids)
+        self._con.execute(f"DELETE FROM job_embeddings WHERE job_uuid IN ({placeholders})", uuids)
+        return len(uuids)
+
+    def get_jobs_by_category(self, limit_days: int = 90, limit: int = 30) -> list[dict]:
+        try:
+            rows = self._con.execute(
+                """
+                SELECT category, SUM(active_count)::INTEGER AS count
+                FROM job_daily_stats
+                WHERE stat_date >= CURRENT_DATE - ?
+                GROUP BY category
+                ORDER BY count DESC
+                LIMIT ?
+                """,
+                [limit_days, limit],
+            ).fetchall()
+        except duckdb.ProgrammingError:
+            return []
+        return [{"category": r[0], "count": r[1]} for r in rows]
+
+    def get_jobs_by_employment_type(self, limit_days: int = 90, limit: int = 20) -> list[dict]:
+        try:
+            rows = self._con.execute(
+                """
+                SELECT employment_type, SUM(active_count)::INTEGER AS count
+                FROM job_daily_stats
+                WHERE stat_date >= CURRENT_DATE - ?
+                GROUP BY employment_type
+                ORDER BY count DESC
+                LIMIT ?
+                """,
+                [limit_days, limit],
+            ).fetchall()
+        except duckdb.ProgrammingError:
+            return []
+        return [{"employment_type": r[0], "count": r[1]} for r in rows]
+
+    def get_jobs_by_position_level(self, limit_days: int = 90, limit: int = 20) -> list[dict]:
+        try:
+            rows = self._con.execute(
+                """
+                SELECT position_level, SUM(active_count)::INTEGER AS count
+                FROM job_daily_stats
+                WHERE stat_date >= CURRENT_DATE - ?
+                GROUP BY position_level
+                ORDER BY count DESC
+                LIMIT ?
+                """,
+                [limit_days, limit],
+            ).fetchall()
+        except duckdb.ProgrammingError:
+            return []
+        return [{"position_level": r[0], "count": r[1]} for r in rows]
+
+    def get_salary_distribution(self) -> list[dict]:
+        bucket_order = ["$0-2k", "$2k-4k", "$4k-6k", "$6k-8k", "$8k+", "Not disclosed"]
+        try:
+            rows = self._con.execute(
+                """
+                SELECT
+                    CASE
+                        WHEN salary_min IS NULL THEN 'Not disclosed'
+                        WHEN salary_min < 2000 THEN '$0-2k'
+                        WHEN salary_min < 4000 THEN '$2k-4k'
+                        WHEN salary_min < 6000 THEN '$4k-6k'
+                        WHEN salary_min < 8000 THEN '$6k-8k'
+                        ELSE '$8k+'
+                    END AS bucket,
+                    COUNT(*)::INTEGER AS count
+                FROM jobs
+                WHERE is_active = TRUE
+                GROUP BY 1
+                """
+            ).fetchall()
+        except duckdb.ProgrammingError:
+            return [{"bucket": b, "count": 0} for b in bucket_order]
+        by_bucket = {r[0]: r[1] for r in rows}
+        return [{"bucket": b, "count": by_bucket.get(b, 0)} for b in bucket_order]
 
     def upsert_taste_embedding(self, *, profile_id: str, model_name: str, embedding: Sequence[float]) -> None:
         """Store a taste-profile embedding.
