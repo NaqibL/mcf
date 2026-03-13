@@ -11,7 +11,7 @@ After applying migration `003_add_rich_job_fields.sql`, existing jobs in your da
 
 - After deploying the Dashboard & DB Streamlining changes
 - When you have many existing jobs (e.g. 60k+) that were crawled before the rich fields were added
-- Run **locally** — large datasets can take hours; GitHub Actions may timeout
+- Run **locally** or via **GitHub Actions** — use batched runs (`--limit 5000`) to avoid timeouts
 
 ## How to Run
 
@@ -39,6 +39,15 @@ uv run mcf backfill-rich-fields --db data/mcf.duckdb
 | `--db-url` | *(env: DATABASE_URL)* | PostgreSQL connection URL |
 | `--rate-limit`, `-r` | `4` | API requests per second |
 | `--limit`, `-l` | *(none)* | Max jobs to process (for batched runs) |
+
+### GitHub Actions (recommended if local fails)
+
+If local runs fail (e.g. DNS/network issues with Supabase), use the workflow:
+
+1. Ensure `DATABASE_URL` is set in **Settings → Secrets and variables → Actions**
+2. Go to **Actions** → **Backfill Rich Fields** → **Run workflow**
+3. Optionally set **limit** (default 5000) and **rate_limit** (default 4)
+4. Run repeatedly until "No jobs need backfill"
 
 ### Batched Runs
 
