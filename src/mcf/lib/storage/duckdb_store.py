@@ -812,29 +812,6 @@ class DuckDBStore(Storage):
             "last_seen_at": row[7],
         }
 
-    def search_jobs(
-        self, *, limit: int = 100, offset: int = 0, category: str | None = None, keywords: str | None = None
-    ) -> list[dict]:
-        """Search jobs with filters."""
-        sql = "SELECT job_uuid, title, company_name, location, job_url FROM jobs WHERE is_active = TRUE"
-        params = []
-        if keywords:
-            sql += " AND (title LIKE ? OR company_name LIKE ? OR location LIKE ?)"
-            params.extend([f"%{keywords}%", f"%{keywords}%", f"%{keywords}%"])
-        sql += " ORDER BY last_seen_at DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
-        rows = self._con.execute(sql, params).fetchall()
-        return [
-            {
-                "job_uuid": row[0],
-                "title": row[1],
-                "company_name": row[2],
-                "location": row[3],
-                "job_url": row[4],
-            }
-            for row in rows
-        ]
-
     def get_recent_runs(self, limit: int = 10) -> list[dict]:
         """Get recent crawl runs with statistics."""
         rows = self._con.execute(
@@ -945,43 +922,6 @@ class DuckDBStore(Storage):
             "matches_deleted": matches_deleted,
         }
 
-    def get_discover_jobs(self, user_id: str, limit: int = 20) -> list[dict]:
-        """Return active jobs with embeddings that the user has NOT yet rated
-        (no 'interested' or 'not_interested' interaction).
-
-        Sorted by recency so the freshest jobs surface first.
-        """
-        rows = self._con.execute(
-            """
-            SELECT j.job_uuid, j.title, j.company_name, j.location, j.job_url,
-                   j.last_seen_at, j.skills_json
-              FROM jobs j
-              JOIN job_embeddings e ON e.job_uuid = j.job_uuid
-             WHERE j.is_active = TRUE
-               AND NOT EXISTS (
-                     SELECT 1 FROM job_interactions i
-                      WHERE i.user_id = ?
-                        AND i.job_uuid = j.job_uuid
-                        AND i.interaction_type IN ('interested', 'not_interested')
-                   )
-             ORDER BY j.last_seen_at DESC
-             LIMIT ?
-            """,
-            [user_id, limit],
-        ).fetchall()
-        return [
-            {
-                "job_uuid": row[0],
-                "title": row[1],
-                "company_name": row[2],
-                "location": row[3],
-                "job_url": row[4],
-                "last_seen_at": row[5],
-                "skills": json.loads(row[6]) if row[6] else [],
-            }
-            for row in rows
-        ]
-
     def get_discover_stats(self, user_id: str) -> dict:
         """Return counts of interested, not_interested, and unrated jobs."""
         row = self._con.execute(
@@ -1024,33 +964,32 @@ class DuckDBStore(Storage):
     # === Dashboard ===
 
     def get_dashboard_summary(self) -> dict:
+        """Summary for MCF jobs only (excludes CAG)."""
+        mcf_filter = "WHERE (job_source = 'mcf' OR job_source IS NULL)"
         row = self._con.execute(
-            """
+            f"""
             SELECT
               COUNT(*) AS total,
               COUNT(*) FILTER (WHERE is_active = TRUE) AS active,
               COUNT(*) FILTER (WHERE is_active = FALSE) AS inactive
-            FROM jobs
+            FROM jobs {mcf_filter}
             """
         ).fetchone()
         total = row[0] if row else 0
         active = row[1] if row else 0
         inactive = row[2] if row else 0
 
-        rows = self._con.execute(
-            """
-            SELECT COALESCE(job_source, 'mcf') AS src, COUNT(*) AS cnt
-            FROM jobs
-            GROUP BY COALESCE(job_source, 'mcf')
-            """
-        ).fetchall()
-        by_source = {r[0]: r[1] for r in rows}
+        row = self._con.execute(
+            f"SELECT COUNT(*) FROM jobs {mcf_filter}"
+        ).fetchone()
+        by_source = {"mcf": row[0] if row else 0}
 
         row = self._con.execute(
             """
             SELECT COUNT(*) FROM jobs j
             JOIN job_embeddings e ON e.job_uuid = j.job_uuid
             WHERE j.is_active = TRUE
+              AND (j.job_source = 'mcf' OR j.job_source IS NULL)
             """
         ).fetchone()
         jobs_with_embeddings = row[0] if row else 0
@@ -1073,6 +1012,7 @@ class DuckDBStore(Storage):
             FROM jobs
             WHERE first_seen_at IS NOT NULL
               AND first_seen_at >= ?
+              AND (job_source = 'mcf' OR job_source IS NULL)
             GROUP BY CAST(first_seen_at AS DATE)
             ORDER BY day ASC
             """,
@@ -1085,33 +1025,28 @@ class DuckDBStore(Storage):
             d["cumulative"] = cumulative
         return daily
 
-    def get_top_companies(self, limit: int = 20) -> list[dict]:
-        rows = self._con.execute(
-            """
-            SELECT COALESCE(company_name, '(Unknown)') AS company_name, COUNT(*) AS count
-            FROM jobs
-            WHERE is_active = TRUE
-            GROUP BY COALESCE(company_name, '(Unknown)')
-            ORDER BY count DESC
-            LIMIT ?
-            """,
-            [limit],
-        ).fetchall()
-        return [{"company_name": r[0], "count": r[1]} for r in rows]
+    def get_jobs_over_time_by_posted(self, limit_days: int = 90) -> list[dict]:
+        from datetime import timedelta
 
-    def get_jobs_by_location(self, limit: int = 20) -> list[dict]:
+        cutoff = _utcnow().date() - timedelta(days=limit_days)
         rows = self._con.execute(
             """
-            SELECT COALESCE(location, '(Unknown)') AS location, COUNT(*) AS count
+            SELECT CAST(posted_date AS DATE) AS day, COUNT(*) AS count
             FROM jobs
-            WHERE is_active = TRUE
-            GROUP BY COALESCE(location, '(Unknown)')
-            ORDER BY count DESC
-            LIMIT ?
+            WHERE posted_date IS NOT NULL
+              AND CAST(posted_date AS DATE) >= ?
+              AND (job_source = 'mcf' OR job_source IS NULL)
+            GROUP BY CAST(posted_date AS DATE)
+            ORDER BY day ASC
             """,
-            [limit],
+            [cutoff],
         ).fetchall()
-        return [{"location": r[0], "count": r[1]} for r in rows]
+        daily = [{"date": str(r[0]), "count": r[1]} for r in rows]
+        cumulative = 0
+        for d in daily:
+            cumulative += d["count"]
+            d["cumulative"] = cumulative
+        return daily
 
     def update_daily_stats(self, run_id: str) -> None:
         """Upsert today's aggregated stats by category x employment_type x position_level."""

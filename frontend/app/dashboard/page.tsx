@@ -45,9 +45,8 @@ type CrawlRun = {
 function DashboardContent() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [jobsOverTime, setJobsOverTime] = useState<JobsOverTimePoint[]>([])
+  const [jobsOverTimeByPosted, setJobsOverTimeByPosted] = useState<JobsOverTimePoint[]>([])
   const [crawlRuns, setCrawlRuns] = useState<CrawlRun[]>([])
-  const [topCompanies, setTopCompanies] = useState<Array<{ company_name: string; count: number }>>([])
-  const [jobsByLocation, setJobsByLocation] = useState<Array<{ location: string; count: number }>>([])
   const [jobsByCategory, setJobsByCategory] = useState<Array<{ category: string; count: number }>>([])
   const [jobsByEmploymentType, setJobsByEmploymentType] = useState<Array<{ employment_type: string; count: number }>>([])
   const [jobsByPositionLevel, setJobsByPositionLevel] = useState<Array<{ position_level: string; count: number }>>([])
@@ -61,12 +60,11 @@ function DashboardContent() {
     const load = async () => {
       setLoading(true)
       try {
-        const [s, j, c, tc, jbl, jbc, jbet, jbpl, sd] = await Promise.all([
+        const [s, j, jPosted, c, jbc, jbet, jbpl, sd] = await Promise.all([
           dashboardApi.getSummary(),
           dashboardApi.getJobsOverTime(limitDays),
+          dashboardApi.getJobsOverTimeByPosted(limitDays),
           dashboardApi.getCrawlRuns(50),
-          dashboardApi.getTopCompanies(20),
-          dashboardApi.getJobsByLocation(20),
           dashboardApi.getJobsByCategory(limitDays, 30),
           dashboardApi.getJobsByEmploymentType(limitDays, 20),
           dashboardApi.getJobsByPositionLevel(limitDays, 20),
@@ -74,13 +72,12 @@ function DashboardContent() {
         ])
         setSummary(s)
         setJobsOverTime(j)
+        setJobsOverTimeByPosted(jPosted)
         setCrawlRuns(c)
-        setTopCompanies(tc)
-        setJobsByLocation(jbl)
-        setJobsByCategory(jbc)
-        setJobsByEmploymentType(jbet)
-        setJobsByPositionLevel(jbpl)
-        setSalaryDistribution(sd)
+        setJobsByCategory((jbc || []).filter((x) => x.category !== 'Unknown'))
+        setJobsByEmploymentType((jbet || []).filter((x) => x.employment_type !== 'Unknown'))
+        setJobsByPositionLevel((jbpl || []).filter((x) => x.position_level !== 'Unknown'))
+        setSalaryDistribution(sd || [])
       } catch (err: unknown) {
         toast.error('Failed to load dashboard. Is the API server running?')
       } finally {
@@ -146,24 +143,24 @@ function DashboardContent() {
               <div className="text-sm text-gray-500">With embeddings</div>
             </div>
             <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm col-span-2 sm:col-span-1">
-              <div className="text-sm font-medium text-gray-700 mb-1">By source</div>
+              <div className="text-sm font-medium text-gray-700 mb-1">By source (MCF only)</div>
               <div className="flex flex-wrap gap-2">
-                {summary?.by_source
-                  ? Object.entries(summary.by_source).map(([src, cnt]) => (
-                      <span key={src} className="text-xs px-2 py-0.5 bg-gray-100 rounded-full">
-                        {src}: {cnt.toLocaleString()}
-                      </span>
-                    ))
-                  : '—'}
+                {summary?.by_source?.mcf != null ? (
+                  <span className="text-xs px-2 py-0.5 bg-gray-100 rounded-full">
+                    mcf: {summary.by_source.mcf.toLocaleString()}
+                  </span>
+                ) : (
+                  '—'
+                )}
               </div>
             </div>
           </div>
         </section>
 
-        {/* Jobs over time (first crawled date) */}
+        {/* Jobs over time - two views */}
         <section>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Jobs over time (first crawled date)</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Jobs over time (when crawler first saw job)</h2>
             <select
               value={limitDays}
               onChange={(e) => setLimitDays(Number(e.target.value))}
@@ -200,6 +197,44 @@ function DashboardContent() {
                   name="Cumulative"
                   stroke="#10b981"
                   fill="#6ee7b7"
+                  fillOpacity={0.3}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+
+        {/* Jobs by MCF posting date */}
+        <section>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            Jobs by MCF posting date
+            <span className="text-sm font-normal text-gray-500 ml-2">(populates as jobs are backfilled)</span>
+          </h2>
+          <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={jobsOverTimeByPosted}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="date" tickFormatter={(v) => formatDate(v)} fontSize={11} />
+                <YAxis fontSize={11} />
+                <Tooltip
+                  formatter={(value: number) => [value.toLocaleString(), '']}
+                  labelFormatter={(label) => formatDate(label)}
+                />
+                <Legend />
+                <Area
+                  type="monotone"
+                  dataKey="count"
+                  name="Posted"
+                  stroke="#10b981"
+                  fill="#6ee7b7"
+                  fillOpacity={0.6}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="cumulative"
+                  name="Cumulative"
+                  stroke="#059669"
+                  fill="#34d399"
                   fillOpacity={0.3}
                 />
               </AreaChart>
@@ -324,50 +359,6 @@ function DashboardContent() {
           </section>
         </div>
 
-        {/* Top companies & Jobs by location */}
-        <div className="grid md:grid-cols-2 gap-8">
-          <section>
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Top companies (active jobs)</h2>
-            <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={topCompanies} layout="vertical" margin={{ left: 80, right: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis type="number" fontSize={11} />
-                  <YAxis
-                    type="category"
-                    dataKey="company_name"
-                    width={75}
-                    fontSize={10}
-                    tick={{ fontSize: 10 }}
-                  />
-                  <Tooltip formatter={(value: number) => [value.toLocaleString(), 'Jobs']} />
-                  <Bar dataKey="count" name="Jobs" fill="#6366f1" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Jobs by location</h2>
-            <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={jobsByLocation} layout="vertical" margin={{ left: 80, right: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis type="number" fontSize={11} />
-                  <YAxis
-                    type="category"
-                    dataKey="location"
-                    width={75}
-                    fontSize={10}
-                    tick={{ fontSize: 10 }}
-                  />
-                  <Tooltip formatter={(value: number) => [value.toLocaleString(), 'Jobs']} />
-                  <Bar dataKey="count" name="Jobs" fill="#0ea5e9" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </section>
-        </div>
       </main>
     </div>
   )

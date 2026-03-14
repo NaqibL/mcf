@@ -311,29 +311,6 @@ class PostgresStore(Storage):
             "first_seen_at": row[6], "last_seen_at": row[7],
         }
 
-    def search_jobs(
-        self,
-        *,
-        limit: int = 100,
-        offset: int = 0,
-        category: str | None = None,
-        keywords: str | None = None,
-    ) -> list[dict]:
-        sql = "SELECT job_uuid, title, company_name, location, job_url FROM jobs WHERE is_active = TRUE"
-        params: list = []
-        if keywords:
-            sql += " AND (title ILIKE %s OR company_name ILIKE %s OR location ILIKE %s)"
-            params.extend([f"%{keywords}%", f"%{keywords}%", f"%{keywords}%"])
-        sql += " ORDER BY last_seen_at DESC LIMIT %s OFFSET %s"
-        params.extend([limit, offset])
-        with self._cur() as cur:
-            cur.execute(sql, params)
-            rows = cur.fetchall()
-        return [
-            {"job_uuid": r[0], "title": r[1], "company_name": r[2], "location": r[3], "job_url": r[4]}
-            for r in rows
-        ]
-
     def get_active_job_count(self) -> int:
         with self._cur() as cur:
             cur.execute("SELECT COUNT(*) FROM jobs WHERE is_active = TRUE")
@@ -849,36 +826,6 @@ class PostgresStore(Storage):
 
     # === Discover ===
 
-    def get_discover_jobs(self, user_id: str, limit: int = 20) -> list[dict]:
-        with self._cur() as cur:
-            cur.execute(
-                """
-                SELECT j.job_uuid, j.title, j.company_name, j.location, j.job_url,
-                       j.last_seen_at, j.skills_json
-                  FROM jobs j
-                  JOIN job_embeddings e ON e.job_uuid = j.job_uuid
-                 WHERE j.is_active = TRUE
-                   AND NOT EXISTS (
-                         SELECT 1 FROM job_interactions i
-                          WHERE i.user_id = %s
-                            AND i.job_uuid = j.job_uuid
-                            AND i.interaction_type IN ('interested', 'not_interested')
-                       )
-                 ORDER BY j.last_seen_at DESC
-                 LIMIT %s
-                """,
-                [user_id, limit],
-            )
-            rows = cur.fetchall()
-        return [
-            {
-                "job_uuid": r[0], "title": r[1], "company_name": r[2],
-                "location": r[3], "job_url": r[4], "last_seen_at": r[5],
-                "skills": json.loads(r[6]) if r[6] else [],
-            }
-            for r in rows
-        ]
-
     def get_discover_stats(self, user_id: str) -> dict:
         with self._cur() as cur:
             cur.execute(
@@ -924,14 +871,16 @@ class PostgresStore(Storage):
     # === Dashboard ===
 
     def get_dashboard_summary(self) -> dict:
+        """Summary for MCF jobs only (excludes CAG)."""
+        mcf_filter = "WHERE (job_source = 'mcf' OR job_source IS NULL)"
         with self._cur() as cur:
             cur.execute(
-                """
+                f"""
                 SELECT
                   COUNT(*) AS total,
                   COUNT(*) FILTER (WHERE is_active = TRUE) AS active,
                   COUNT(*) FILTER (WHERE is_active = FALSE) AS inactive
-                FROM jobs
+                FROM jobs {mcf_filter}
                 """
             )
             row = cur.fetchone()
@@ -941,13 +890,13 @@ class PostgresStore(Storage):
 
         with self._cur() as cur:
             cur.execute(
-                """
-                SELECT COALESCE(job_source, 'mcf') AS src, COUNT(*) AS cnt
-                FROM jobs
-                GROUP BY COALESCE(job_source, 'mcf')
+                f"""
+                SELECT 'mcf' AS src, COUNT(*) AS cnt
+                FROM jobs {mcf_filter}
                 """
             )
-            by_source = {r[0]: r[1] for r in cur.fetchall()}
+            row = cur.fetchone()
+        by_source = {"mcf": row[0] if row else 0}
 
         with self._cur() as cur:
             cur.execute(
@@ -955,6 +904,7 @@ class PostgresStore(Storage):
                 SELECT COUNT(*) FROM jobs j
                 JOIN job_embeddings e ON e.job_uuid = j.job_uuid
                 WHERE j.is_active = TRUE
+                  AND (j.job_source = 'mcf' OR j.job_source IS NULL)
                 """
             )
             row = cur.fetchone()
@@ -979,6 +929,7 @@ class PostgresStore(Storage):
                 FROM jobs
                 WHERE first_seen_at IS NOT NULL
                   AND first_seen_at >= %s
+                  AND (job_source = 'mcf' OR job_source IS NULL)
                 GROUP BY DATE(first_seen_at)
                 ORDER BY day ASC
                 """,
@@ -992,37 +943,30 @@ class PostgresStore(Storage):
             d["cumulative"] = cumulative
         return daily
 
-    def get_top_companies(self, limit: int = 20) -> list[dict]:
-        with self._cur() as cur:
-            cur.execute(
-                """
-                SELECT COALESCE(company_name, '(Unknown)') AS company_name, COUNT(*) AS count
-                FROM jobs
-                WHERE is_active = TRUE
-                GROUP BY COALESCE(company_name, '(Unknown)')
-                ORDER BY count DESC
-                LIMIT %s
-                """,
-                [limit],
-            )
-            rows = cur.fetchall()
-        return [{"company_name": r[0], "count": r[1]} for r in rows]
+    def get_jobs_over_time_by_posted(self, limit_days: int = 90) -> list[dict]:
+        from datetime import timedelta
 
-    def get_jobs_by_location(self, limit: int = 20) -> list[dict]:
+        cutoff = _utcnow().date() - timedelta(days=limit_days)
         with self._cur() as cur:
             cur.execute(
                 """
-                SELECT COALESCE(location, '(Unknown)') AS location, COUNT(*) AS count
+                SELECT posted_date::date AS day, COUNT(*) AS count
                 FROM jobs
-                WHERE is_active = TRUE
-                GROUP BY COALESCE(location, '(Unknown)')
-                ORDER BY count DESC
-                LIMIT %s
+                WHERE posted_date IS NOT NULL
+                  AND posted_date::date >= %s
+                  AND (job_source = 'mcf' OR job_source IS NULL)
+                GROUP BY posted_date::date
+                ORDER BY day ASC
                 """,
-                [limit],
+                [cutoff],
             )
             rows = cur.fetchall()
-        return [{"location": r[0], "count": r[1]} for r in rows]
+        daily = [{"date": str(r[0]), "count": r[1]} for r in rows]
+        cumulative = 0
+        for d in daily:
+            cumulative += d["count"]
+            d["cumulative"] = cumulative
+        return daily
 
     def update_daily_stats(self, run_id: str) -> None:
         """Upsert today's aggregated stats by category x employment_type x position_level."""

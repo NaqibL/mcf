@@ -152,6 +152,12 @@ export const dashboardApi = {
     })
     return response.data as Array<{ date: string; count: number; cumulative: number }>
   },
+  getJobsOverTimeByPosted: async (limitDays = 90) => {
+    const response = await api.get('/api/dashboard/jobs-over-time-by-posted', {
+      params: { limit_days: limitDays },
+    })
+    return response.data as Array<{ date: string; count: number; cumulative: number }>
+  },
   getCrawlRuns: async (limit = 50) => {
     const response = await api.get('/api/dashboard/crawl-runs', {
       params: { limit },
@@ -165,18 +171,6 @@ export const dashboardApi = {
       maintained: number
       removed: number
     }>
-  },
-  getTopCompanies: async (limit = 20) => {
-    const response = await api.get('/api/dashboard/top-companies', {
-      params: { limit },
-    })
-    return response.data as Array<{ company_name: string; count: number }>
-  },
-  getJobsByLocation: async (limit = 20) => {
-    const response = await api.get('/api/dashboard/jobs-by-location', {
-      params: { limit },
-    })
-    return response.data as Array<{ location: string; count: number }>
   },
   getJobsByCategory: async (limitDays = 90, limit = 30) => {
     const response = await api.get('/api/dashboard/jobs-by-category', {

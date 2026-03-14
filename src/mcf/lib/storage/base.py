@@ -112,16 +112,6 @@ class Storage(ABC):
     def get_job(self, job_uuid: str) -> dict | None: ...
 
     @abstractmethod
-    def search_jobs(
-        self,
-        *,
-        limit: int = 100,
-        offset: int = 0,
-        category: str | None = None,
-        keywords: str | None = None,
-    ) -> list[dict]: ...
-
-    @abstractmethod
     def get_active_job_count(self) -> int: ...
 
     # === Job embeddings ===
@@ -257,9 +247,6 @@ class Storage(ABC):
     # === Discover ===
 
     @abstractmethod
-    def get_discover_jobs(self, user_id: str, limit: int = 20) -> list[dict]: ...
-
-    @abstractmethod
     def get_discover_stats(self, user_id: str) -> dict: ...
 
     # === Dashboard ===
@@ -270,11 +257,9 @@ class Storage(ABC):
     @abstractmethod
     def get_jobs_over_time(self, bucket_days: int = 1, limit_days: int = 90) -> list[dict]: ...
 
-    @abstractmethod
-    def get_top_companies(self, limit: int = 20) -> list[dict]: ...
-
-    @abstractmethod
-    def get_jobs_by_location(self, limit: int = 20) -> list[dict]: ...
+    def get_jobs_over_time_by_posted(self, limit_days: int = 90) -> list[dict]:
+        """Jobs grouped by MCF posted_date (metadata.newPostingDate). Sparse until backfilled."""
+        raise NotImplementedError
 
     @abstractmethod
     def get_jobs_by_category(self, limit_days: int = 90, limit: int = 30) -> list[dict]: ...

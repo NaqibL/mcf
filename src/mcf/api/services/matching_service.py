@@ -50,8 +50,9 @@ class MatchingService:
         max_days_old: int | None,
     ) -> tuple[str, list[str]]:
         """Run the cheap vector query, score, filter, and create a session.
-        Returns (session_id, ranked_ids). ranked_ids are "uuid:score" strings."""
-        ranked_with_meta = self.store.get_active_job_ids_ranked(embedding, limit=5000)
+        Returns (session_id, ranked_ids). ranked_ids are "uuid:score" strings.
+        Use 20k pool to balance Load-more coverage vs query performance."""
+        ranked_with_meta = self.store.get_active_job_ids_ranked(embedding, limit=20000)
         if not ranked_with_meta:
             return ("", [])
 
