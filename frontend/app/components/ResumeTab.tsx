@@ -67,14 +67,6 @@ export default function ResumeTab() {
           setJobs((prev) => [...prev, ...data.matches])
         }
         setHasMore(data.has_more)
-        // #region agent log
-        _log('loadJobs_success', {
-          jobsCount: data.matches?.length ?? 0,
-          newSessionId: data.session_id,
-          newSessionOffset: append ? off + JOBS_PER_PAGE : JOBS_PER_PAGE,
-          hypothesisId: 'H1',
-        })
-        // #endregion
       } catch (err: any) {
         toast.error('Failed to load jobs. Is the API server running?')
       } finally {

@@ -106,6 +106,7 @@ A detailed rundown of what is implemented vs. what was discussed but not yet don
 | Jobs load slowly (without pgvector) | Medium | Run `scripts/migrations/001_add_pgvector.sql` for fast vector search. First request after deploy slow (model load). |
 | GitHub Action 6h timeout | Medium | Full MCF dataset may exceed this; CPU-only, no GPU. |
 | `mark-interaction` no Postgres | Low | CLI only; web app uses API which supports Postgres. |
+| ~~Resume tab perpetual loading~~ | Fixed | Was caused by `loadJobs` useCallback deps; fixed via `sessionRef` for append-only session state. |
 
 ---
 
