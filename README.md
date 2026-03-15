@@ -72,7 +72,7 @@ uv run mcf match-jobs
 **Via Web Dashboard:**
 ```bash
 # Start API server (terminal 1)
-uv run uvicorn mcf.api.server:app --reload --port 8000
+uv run python -m  uvicorn mcf.api.server:app --reload --port 8000
 
 # Start frontend (terminal 2)
 cd frontend

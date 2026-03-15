@@ -297,6 +297,50 @@ def backfill_rich_fields(
         store.close()
 
 
+@app.command("backfill-job-daily-stats")
+def backfill_job_daily_stats(
+    db: Annotated[
+        Optional[Path],
+        typer.Option("--db", help="DuckDB file path (default: data/mcf.duckdb)"),
+    ] = None,
+    db_url: Annotated[
+        Optional[str],
+        typer.Option("--db-url", help="PostgreSQL connection URL (overrides --db)", envvar="DATABASE_URL"),
+    ] = None,
+    limit_days: Annotated[
+        int,
+        typer.Option(
+            "--limit-days",
+            "-d",
+            help="Number of days to backfill (default: 365). Use 0 for full range from data.",
+        ),
+    ] = 365,
+) -> None:
+    """One-time backfill of job_daily_stats from the jobs table.
+
+    Populates historical daily stats (active_count, added_count, removed_count) per
+    category/employment_type/position_level so dashboard charts show full time series.
+    Run once to catch up; the crawler will keep job_daily_stats updated going forward.
+    """
+    store, db_display = _open_store(db, db_url)
+
+    try:
+        console.print("[bold cyan]Backfill job_daily_stats[/bold cyan]")
+        console.print(f"  Storage: [green]{db_display}[/green]")
+        console.print(f"  Limit: [yellow]{limit_days}[/yellow] days (0 = full range from data)")
+        console.print()
+        console.print("[cyan]Backfilling...[/cyan] (this may take several minutes)")
+
+        result = store.backfill_job_daily_stats(limit_days=limit_days)
+
+        console.print()
+        console.print("[bold green]Backfill complete[/bold green]")
+        console.print(f"  Date range: [cyan]{result['date_start']}[/cyan] to [cyan]{result['date_end']}[/cyan]")
+        console.print(f"  Rows upserted: [cyan]{result['rows_upserted']:,}[/cyan]")
+    finally:
+        store.close()
+
+
 @app.command("process-resume")
 def process_resume(
     resume_path: Annotated[
@@ -790,6 +834,120 @@ def export_to_postgres(
     finally:
         duck_con.close()
         pg_con.close()
+
+
+@app.command("db-context")
+def db_context(
+    db_url: Annotated[
+        str,
+        typer.Option("--db-url", help="PostgreSQL connection URL", envvar="DATABASE_URL"),
+    ] = "",
+    sample: Annotated[
+        int,
+        typer.Option("--sample", "-s", help="Sample rows per table (0 to skip)"),
+    ] = 3,
+    output: Annotated[
+        Optional[Path],
+        typer.Option("--output", "-o", help="Write to file instead of stdout"),
+    ] = None,
+) -> None:
+    """Query Supabase/Postgres schema and data for agent context.
+
+    Outputs markdown with tables, columns, row counts, and optional sample rows.
+    Use when building features that touch the database — run this first to get
+    schema and sample data context.
+
+    Requires DATABASE_URL or --db-url (Postgres only).
+    """
+    if not db_url:
+        console.print("[bold red]Error:[/bold red] --db-url or DATABASE_URL is required")
+        raise typer.Exit(1)
+
+    import psycopg2
+
+    conn = psycopg2.connect(db_url)
+    conn.autocommit = True
+
+    lines: list[str] = []
+
+    try:
+        with conn.cursor() as cur:
+            # Tables in public schema (exclude Supabase internal)
+            cur.execute(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+                  AND table_type = 'BASE TABLE'
+                  AND table_name NOT LIKE 'pg_%'
+                ORDER BY table_name
+                """
+            )
+            tables = [r[0] for r in cur.fetchall()]
+
+        lines.append("# Supabase Database Context")
+        lines.append("")
+        lines.append(f"*Generated for agent context. Tables: {len(tables)}*")
+        lines.append("")
+
+        for table in tables:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT column_name, data_type, is_nullable
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = %s
+                    ORDER BY ordinal_position
+                    """,
+                    [table],
+                )
+                cols = cur.fetchall()
+
+                cur.execute("SELECT COUNT(*) FROM " + f'"{table}"')
+                count = cur.fetchone()[0]
+
+            lines.append(f"## {table} (n={count:,})")
+            lines.append("")
+            lines.append("| Column | Type | Nullable |")
+            lines.append("|--------|------|----------|")
+            for col_name, dtype, nullable in cols:
+                lines.append(f"| {col_name} | {dtype} | {nullable} |")
+            lines.append("")
+
+            if sample > 0 and count > 0:
+                with conn.cursor() as cur:
+                    col_list = ", ".join(f'"{c[0]}"' for c in cols)
+                    cur.execute(
+                        f'SELECT {col_list} FROM "{table}" LIMIT %s',
+                        [sample],
+                    )
+                    rows = cur.fetchall()
+                lines.append("**Sample rows:**")
+                lines.append("")
+                for i, row in enumerate(rows, 1):
+                    lines.append(f"### Row {i}")
+                    for j, (col_name, dtype, _) in enumerate(cols):
+                        val = row[j]
+                        if val is not None:
+                            s = str(val)
+                            if "embedding" in col_name.lower():
+                                val = f"<{dtype} len={len(s)}>"
+                            elif len(s) > 100:
+                                val = s[:97] + "..."
+                        lines.append(f"- {col_name}: {val}")
+                    lines.append("")
+                lines.append("")
+
+        text = "\n".join(lines)
+
+        if output:
+            output.write_text(text, encoding="utf-8")
+            console.print(f"[green]Wrote database context to {output}[/green]")
+        else:
+            console.print(text)
+
+    finally:
+        conn.close()
 
 
 def main() -> None:

@@ -154,34 +154,24 @@ def get_dashboard_summary(user_id: str = Depends(get_current_user)):
     return store.get_dashboard_summary()
 
 
-@app.get("/api/dashboard/jobs-over-time")
-def get_dashboard_jobs_over_time(
+@app.get("/api/dashboard/jobs-over-time-posted-and-removed")
+def get_dashboard_jobs_over_time_posted_and_removed(
     limit_days: int = Query(default=90, ge=1, le=365),
     user_id: str = Depends(get_current_user),
 ):
-    """Return daily job counts over time (first_seen_at = when crawler first saw job)."""
+    """Return daily posted (active) and removed (inactive) job counts by date."""
     store = get_store()
-    return store.get_jobs_over_time(bucket_days=1, limit_days=limit_days)
+    return store.get_jobs_over_time_posted_and_removed(limit_days=limit_days)
 
 
-@app.get("/api/dashboard/jobs-over-time-by-posted")
-def get_dashboard_jobs_over_time_by_posted(
+@app.get("/api/dashboard/active-jobs-over-time")
+def get_dashboard_active_jobs_over_time(
     limit_days: int = Query(default=90, ge=1, le=365),
     user_id: str = Depends(get_current_user),
 ):
-    """Return daily job counts by MCF posting date (metadata.newPostingDate). Sparse until backfilled."""
+    """Return total active jobs per day from job_daily_stats."""
     store = get_store()
-    return store.get_jobs_over_time_by_posted(limit_days=limit_days)
-
-
-@app.get("/api/dashboard/crawl-runs")
-def get_dashboard_crawl_runs(
-    limit: int = Query(default=50, ge=1, le=200),
-    user_id: str = Depends(get_current_user),
-):
-    """Return recent crawl runs with added/maintained/removed counts."""
-    store = get_store()
-    return store.get_recent_runs(limit=limit)
+    return store.get_active_jobs_over_time(limit_days=limit_days)
 
 
 @app.get("/api/dashboard/jobs-by-category")
@@ -193,6 +183,27 @@ def get_dashboard_jobs_by_category(
     """Return job counts by MCF category (from job_daily_stats)."""
     store = get_store()
     return store.get_jobs_by_category(limit_days=limit_days, limit=limit)
+
+
+@app.get("/api/dashboard/category-trends")
+def get_dashboard_category_trends(
+    category: str = Query(..., min_length=1),
+    limit_days: int = Query(default=90, ge=1, le=365),
+    user_id: str = Depends(get_current_user),
+):
+    """Return trend data for a specific category from job_daily_stats."""
+    store = get_store()
+    return store.get_category_trends(category=category, limit_days=limit_days)
+
+
+@app.get("/api/dashboard/category-stats")
+def get_dashboard_category_stats(
+    category: str = Query(..., min_length=1),
+    user_id: str = Depends(get_current_user),
+):
+    """Return employment type, position level, salary breakdown for a category."""
+    store = get_store()
+    return store.get_category_stats(category=category)
 
 
 @app.get("/api/dashboard/jobs-by-employment-type")

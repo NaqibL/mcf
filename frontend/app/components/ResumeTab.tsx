@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { jobsApi, matchesApi, profileApi, discoverApi } from '@/lib/api'
 import type { Match, DiscoverStats } from '@/lib/types'
 import { MatchCard } from './JobCard'
@@ -25,6 +25,7 @@ export default function ResumeTab() {
   const [filters, setFilters] = useState<Filters>({ minSimilarity: 0, maxDaysOld: null })
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [sessionOffset, setSessionOffset] = useState(0)
+  const sessionRef = useRef<{ sessionId: string | null; sessionOffset: number }>({ sessionId: null, sessionOffset: 0 })
 
   const loadStats = useCallback(async () => {
     try {
@@ -43,7 +44,8 @@ export default function ResumeTab() {
         setLoading(true)
       }
       try {
-        const offset = append ? sessionOffset : 0
+        const { sessionId: sid, sessionOffset: off } = sessionRef.current
+        const offset = append ? off : 0
         const data = await matchesApi.get(
           'resume',
           true,
@@ -52,17 +54,27 @@ export default function ResumeTab() {
           filters.minSimilarity / 100,
           filters.maxDaysOld ?? undefined,
           true,
-          append ? (sessionId ?? undefined) : undefined,
+          append ? (sid ?? undefined) : undefined,
         )
         if (!append) {
+          sessionRef.current = { sessionId: data.session_id, sessionOffset: JOBS_PER_PAGE }
           setSessionId(data.session_id)
           setSessionOffset(JOBS_PER_PAGE)
           setJobs(data.matches)
         } else {
+          sessionRef.current = { ...sessionRef.current, sessionOffset: off + JOBS_PER_PAGE }
           setSessionOffset((prev) => prev + JOBS_PER_PAGE)
           setJobs((prev) => [...prev, ...data.matches])
         }
         setHasMore(data.has_more)
+        // #region agent log
+        _log('loadJobs_success', {
+          jobsCount: data.matches?.length ?? 0,
+          newSessionId: data.session_id,
+          newSessionOffset: append ? off + JOBS_PER_PAGE : JOBS_PER_PAGE,
+          hypothesisId: 'H1',
+        })
+        // #endregion
       } catch (err: any) {
         toast.error('Failed to load jobs. Is the API server running?')
       } finally {
@@ -70,7 +82,7 @@ export default function ResumeTab() {
         setLoadingMore(false)
       }
     },
-    [filters.minSimilarity, filters.maxDaysOld, sessionId, sessionOffset],
+    [filters.minSimilarity, filters.maxDaysOld],
   )
 
   useEffect(() => {
@@ -254,15 +266,16 @@ export default function ResumeTab() {
             or lower your filters above.
           </p>
           <button
-            onClick={() => {
-              setSessionId(null)
-              setSessionOffset(0)
-              loadJobs(false)
-            }}
-            className="mt-4 px-5 py-2 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
-          >
-            Refresh
-          </button>
+              onClick={() => {
+                sessionRef.current = { sessionId: null, sessionOffset: 0 }
+                setSessionId(null)
+                setSessionOffset(0)
+                loadJobs(false)
+              }}
+              className="mt-4 px-5 py-2 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
+            >
+              Refresh
+            </button>
         </div>
       ) : (
         <div className="space-y-4">
@@ -293,6 +306,7 @@ export default function ResumeTab() {
             </button>
             <button
               onClick={() => {
+                sessionRef.current = { sessionId: null, sessionOffset: 0 }
                 setSessionId(null)
                 setSessionOffset(0)
                 loadJobs(false)

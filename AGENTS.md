@@ -48,6 +48,20 @@ For AI agents working on this codebase. See [PROJECT_STATUS.md](PROJECT_STATUS.m
 
 ---
 
+## Database Context (for agents)
+
+When building features that touch the database, run `mcf db-context` first to get schema + sample data from Supabase:
+
+```bash
+uv run mcf db-context          # schema + 3 sample rows per table
+uv run mcf db-context -s 5     # 5 sample rows
+uv run mcf db-context -o docs/db_context.md  # write to file
+```
+
+Requires `DATABASE_URL` (Postgres). Output is markdown with tables, columns, types, row counts, and sample rows.
+
+---
+
 ## Gotchas
 
 | Issue | Details |

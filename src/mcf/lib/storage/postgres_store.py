@@ -910,63 +910,209 @@ class PostgresStore(Storage):
             row = cur.fetchone()
         jobs_with_embeddings = row[0] if row else 0
 
+        with self._cur() as cur:
+            cur.execute(
+                f"""
+                SELECT COUNT(*) FROM jobs
+                WHERE is_active = TRUE
+                  AND (job_source = 'mcf' OR job_source IS NULL)
+                  AND (categories_json IS NULL OR categories_json = '' OR categories_json = '[]')
+                """
+            )
+            row = cur.fetchone()
+        jobs_needing_backfill = row[0] if row else 0
+
         return {
             "total_jobs": total,
             "active_jobs": active,
             "inactive_jobs": inactive,
             "by_source": by_source,
             "jobs_with_embeddings": jobs_with_embeddings,
+            "jobs_needing_backfill": jobs_needing_backfill,
         }
 
-    def get_jobs_over_time(self, bucket_days: int = 1, limit_days: int = 90) -> list[dict]:
-        from datetime import timedelta
-
-        cutoff = _utcnow() - timedelta(days=limit_days)
-        with self._cur() as cur:
-            cur.execute(
-                """
-                SELECT DATE(first_seen_at) AS day, COUNT(*) AS count
-                FROM jobs
-                WHERE first_seen_at IS NOT NULL
-                  AND first_seen_at >= %s
-                  AND (job_source = 'mcf' OR job_source IS NULL)
-                GROUP BY DATE(first_seen_at)
-                ORDER BY day ASC
-                """,
-                [cutoff],
-            )
-            rows = cur.fetchall()
-        daily = [{"date": str(r[0]), "count": r[1]} for r in rows]
-        cumulative = 0
-        for d in daily:
-            cumulative += d["count"]
-            d["cumulative"] = cumulative
-        return daily
-
-    def get_jobs_over_time_by_posted(self, limit_days: int = 90) -> list[dict]:
+    def get_jobs_over_time_posted_and_removed(self, limit_days: int = 90) -> list[dict]:
         from datetime import timedelta
 
         cutoff = _utcnow().date() - timedelta(days=limit_days)
+        mcf = "AND (job_source = 'mcf' OR job_source IS NULL)"
+
+        # Posted: active jobs by posted_date (fallback to first_seen_at when posted_date is null)
         with self._cur() as cur:
             cur.execute(
-                """
-                SELECT posted_date::date AS day, COUNT(*) AS count
+                f"""
+                SELECT COALESCE(posted_date::date, first_seen_at::date) AS day, COUNT(*) AS count
                 FROM jobs
-                WHERE posted_date IS NOT NULL
-                  AND posted_date::date >= %s
-                  AND (job_source = 'mcf' OR job_source IS NULL)
-                GROUP BY posted_date::date
+                WHERE is_active = TRUE
+                  AND (posted_date IS NOT NULL OR first_seen_at IS NOT NULL)
+                  AND COALESCE(posted_date::date, first_seen_at::date) >= %s {mcf}
+                GROUP BY COALESCE(posted_date::date, first_seen_at::date)
                 ORDER BY day ASC
                 """,
                 [cutoff],
             )
+            posted_rows = {str(r[0]): r[1] for r in cur.fetchall()}
+
+        # Removed: inactive jobs by last_seen_at (fallback to first_seen_at when last_seen_at is null)
+        with self._cur() as cur:
+            cur.execute(
+                f"""
+                SELECT COALESCE(last_seen_at::date, first_seen_at::date) AS day, COUNT(*) AS count
+                FROM jobs
+                WHERE is_active = FALSE
+                  AND (last_seen_at IS NOT NULL OR first_seen_at IS NOT NULL)
+                  AND COALESCE(last_seen_at::date, first_seen_at::date) >= %s {mcf}
+                GROUP BY COALESCE(last_seen_at::date, first_seen_at::date)
+                ORDER BY day ASC
+                """,
+                [cutoff],
+            )
+            removed_rows = {str(r[0]): r[1] for r in cur.fetchall()}
+
+        all_dates = sorted(set(posted_rows.keys()) | set(removed_rows.keys()))
+        cumulative_posted = 0
+        cumulative_removed = 0
+        result = []
+        for d in all_dates:
+            p = posted_rows.get(d, 0)
+            r = removed_rows.get(d, 0)
+            cumulative_posted += p
+            cumulative_removed += r
+            result.append({
+                "date": d,
+                "posted_count": p,
+                "removed_count": r,
+                "cumulative_posted": cumulative_posted,
+                "cumulative_removed": cumulative_removed,
+            })
+        return result
+
+    def get_active_jobs_over_time(self, limit_days: int = 90) -> list[dict]:
+        from datetime import timedelta
+
+        cutoff = _utcnow().date() - timedelta(days=limit_days)
+        today = _utcnow().date()
+
+        with self._cur() as cur:
+            try:
+                cur.execute(
+                    """
+                    SELECT stat_date::date AS day, SUM(active_count)::int AS active_count
+                    FROM job_daily_stats
+                    WHERE stat_date >= %s AND category != 'Unknown'
+                    GROUP BY stat_date
+                    ORDER BY stat_date ASC
+                    """,
+                    [cutoff],
+                )
+                rows = cur.fetchall()
+            except Exception:
+                rows = []
+
+        if rows:
+            return [{"date": str(r[0]), "active_count": r[1]} for r in rows]
+
+        # Fallback: compute from jobs table when job_daily_stats is empty
+        with self._cur() as cur:
+            cur.execute(
+                f"""
+                WITH date_series AS (
+                    SELECT generate_series(%s::date, %s::date, '1 day'::interval)::date AS d
+                )
+                SELECT ds.d::text AS date,
+                    (SELECT COUNT(*)::int FROM jobs j
+                     WHERE (j.job_source = 'mcf' OR j.job_source IS NULL)
+                       AND j.posted_date IS NOT NULL
+                       AND j.posted_date::date <= ds.d
+                       AND (j.is_active = TRUE
+                            OR (j.last_seen_at IS NOT NULL AND j.last_seen_at::date > ds.d))
+                    ) AS active_count
+                FROM date_series ds
+                ORDER BY ds.d
+                """,
+                [cutoff, today],
+            )
             rows = cur.fetchall()
-        daily = [{"date": str(r[0]), "count": r[1]} for r in rows]
-        cumulative = 0
-        for d in daily:
-            cumulative += d["count"]
-            d["cumulative"] = cumulative
-        return daily
+        return [{"date": str(r[0]), "active_count": r[1]} for r in rows]
+
+    def backfill_job_daily_stats(self, limit_days: int = 365) -> dict:
+        """One-time backfill of job_daily_stats from jobs table for historical dates."""
+        from datetime import timedelta
+
+        today = _utcnow().date()
+        if limit_days <= 0:
+            with self._cur() as cur:
+                cur.execute(
+                    """
+                    SELECT MIN(LEAST(
+                        COALESCE(posted_date::date, '9999-12-31'::date),
+                        COALESCE(first_seen_at::date, '9999-12-31'::date),
+                        COALESCE(last_seen_at::date, '9999-12-31'::date)
+                    ))
+                    FROM jobs
+                    WHERE (job_source = 'mcf' OR job_source IS NULL)
+                    """
+                )
+                row = cur.fetchone()
+            start_date = row[0] if row and row[0] and str(row[0]) != "9999-12-31" else today
+        else:
+            start_date = today - timedelta(days=limit_days)
+
+        cat_ex = "COALESCE(NULLIF(TRIM(BOTH '\"' FROM (categories_json::jsonb->0)::text), ''), 'Unknown')"
+        et_ex = "COALESCE(NULLIF(TRIM(BOTH '\"' FROM (employment_types_json::jsonb->0)::text), ''), 'Unknown')"
+        pl_ex = "COALESCE(NULLIF(TRIM(BOTH '\"' FROM (position_levels_json::jsonb->0)::text), ''), 'Unknown')"
+        mcf = "AND (job_source = 'mcf' OR job_source IS NULL)"
+
+        total_rows = 0
+        d = start_date
+        while d <= today:
+            with self._cur() as cur:
+                cur.execute(
+                    f"""
+                    INSERT INTO job_daily_stats
+                        (stat_date, category, employment_type, position_level, active_count, added_count, removed_count)
+                    SELECT
+                        %s AS stat_date,
+                        {cat_ex} AS category,
+                        {et_ex} AS employment_type,
+                        {pl_ex} AS position_level,
+                        COUNT(*) FILTER (
+                            WHERE posted_date IS NOT NULL AND posted_date::date <= %s
+                            AND (is_active = TRUE OR (last_seen_at IS NOT NULL AND last_seen_at::date > %s))
+                        )::int AS active_count,
+                        COUNT(*) FILTER (
+                            WHERE (posted_date IS NOT NULL AND posted_date::date = %s)
+                            OR (first_seen_at IS NOT NULL AND first_seen_at::date = %s)
+                        )::int AS added_count,
+                        COUNT(*) FILTER (
+                            WHERE last_seen_at IS NOT NULL AND last_seen_at::date = %s AND is_active = FALSE
+                        )::int AS removed_count
+                    FROM jobs
+                    WHERE 1=1 {mcf}
+                    GROUP BY 2, 3, 4
+                    HAVING COUNT(*) FILTER (
+                        WHERE posted_date IS NOT NULL AND posted_date::date <= %s
+                        AND (is_active = TRUE OR (last_seen_at IS NOT NULL AND last_seen_at::date > %s))
+                    ) > 0
+                    OR COUNT(*) FILTER (
+                        WHERE (posted_date IS NOT NULL AND posted_date::date = %s)
+                        OR (first_seen_at IS NOT NULL AND first_seen_at::date = %s)
+                    ) > 0
+                    OR COUNT(*) FILTER (
+                        WHERE last_seen_at IS NOT NULL AND last_seen_at::date = %s AND is_active = FALSE
+                    ) > 0
+                    ON CONFLICT (stat_date, category, employment_type, position_level)
+                    DO UPDATE SET
+                        active_count = EXCLUDED.active_count,
+                        added_count = EXCLUDED.added_count,
+                        removed_count = EXCLUDED.removed_count
+                    """,
+                    [d, d, d, d, d, d, d, d, d, d, d],
+                )
+                total_rows += cur.rowcount
+            d += timedelta(days=1)
+
+        return {"rows_upserted": total_rows, "date_start": str(start_date), "date_end": str(today)}
 
     def update_daily_stats(self, run_id: str) -> None:
         """Upsert today's aggregated stats by category x employment_type x position_level."""
@@ -1029,30 +1175,203 @@ class PostgresStore(Storage):
         with self._cur() as cur:
             cur.execute(
                 """
-                SELECT category, SUM(active_count)::int AS count
-                FROM job_daily_stats
-                WHERE stat_date >= CURRENT_DATE - %s::int
-                GROUP BY category
+                SELECT
+                    COALESCE(
+                        NULLIF(TRIM(BOTH '"' FROM (categories_json::jsonb->0)::text), ''),
+                        'Unknown'
+                    ) AS category,
+                    COUNT(*)::int AS count
+                FROM jobs
+                WHERE is_active = TRUE
+                  AND (job_source = 'mcf' OR job_source IS NULL)
+                GROUP BY 1
                 ORDER BY count DESC
                 LIMIT %s
                 """,
-                [limit_days, limit],
+                [limit],
             )
             rows = cur.fetchall()
         return [{"category": r[0], "count": r[1]} for r in rows]
+
+    def get_category_trends(self, category: str, limit_days: int = 90) -> list[dict]:
+        from datetime import timedelta
+
+        cutoff = _utcnow().date() - timedelta(days=limit_days)
+        today = _utcnow().date()
+
+        with self._cur() as cur:
+            try:
+                cur.execute(
+                    """
+                    SELECT stat_date::date AS day,
+                           SUM(active_count)::int AS active_count,
+                           SUM(added_count)::int AS added_count,
+                           SUM(removed_count)::int AS removed_count
+                    FROM job_daily_stats
+                    WHERE category = %s AND stat_date >= %s
+                    GROUP BY stat_date
+                    ORDER BY stat_date ASC
+                    """,
+                    [category, cutoff],
+                )
+                rows = cur.fetchall()
+            except Exception:
+                rows = []
+
+        if rows:
+            return [
+                {"date": str(r[0]), "active_count": r[1], "added_count": r[2], "removed_count": r[3]}
+                for r in rows
+            ]
+
+        # Fallback: compute active count per day from jobs table for this category
+        cat_extract = "COALESCE(NULLIF(TRIM(BOTH '\"' FROM (categories_json::jsonb->0)::text), ''), 'Unknown')"
+        with self._cur() as cur:
+            cur.execute(
+                f"""
+                WITH date_series AS (
+                    SELECT generate_series(%s::date, %s::date, '1 day'::interval)::date AS d
+                )
+                SELECT ds.d::text AS date,
+                    (SELECT COUNT(*)::int FROM jobs j
+                     WHERE (j.job_source = 'mcf' OR j.job_source IS NULL)
+                       AND {cat_extract} = %s
+                       AND j.posted_date IS NOT NULL
+                       AND j.posted_date::date <= ds.d
+                       AND (j.is_active = TRUE
+                            OR (j.last_seen_at IS NOT NULL AND j.last_seen_at::date > ds.d))
+                    ) AS active_count
+                FROM date_series ds
+                ORDER BY ds.d
+                """,
+                [cutoff, today, category],
+            )
+            rows = cur.fetchall()
+        return [
+            {"date": str(r[0]), "active_count": r[1], "added_count": 0, "removed_count": 0}
+            for r in rows
+        ]
+
+    def get_category_stats(self, category: str) -> dict:
+        cat_filter = """
+            AND COALESCE(
+                NULLIF(TRIM(BOTH '"' FROM (categories_json::jsonb->0)::text), ''),
+                'Unknown'
+            ) = %s
+        """
+        mcf = "AND (job_source = 'mcf' OR job_source IS NULL)"
+        bucket_order = ["$0-2k", "$2k-4k", "$4k-6k", "$6k-8k", "$8k+", "Not disclosed"]
+
+        with self._cur() as cur:
+            cur.execute(
+                f"""
+                SELECT COUNT(*)::int
+                FROM jobs
+                WHERE is_active = TRUE {mcf} {cat_filter}
+                """,
+                [category],
+            )
+            active_count = cur.fetchone()[0]
+
+            cur.execute(
+                f"""
+                SELECT
+                    COALESCE(
+                        NULLIF(TRIM(BOTH '"' FROM (employment_types_json::jsonb->0)::text), ''),
+                        'Unknown'
+                    ) AS employment_type,
+                    COUNT(*)::int AS count
+                FROM jobs
+                WHERE is_active = TRUE {mcf} {cat_filter}
+                GROUP BY 1
+                ORDER BY count DESC
+                LIMIT 20
+                """,
+                [category],
+            )
+            employment_types = [{"employment_type": r[0], "count": r[1]} for r in cur.fetchall()]
+
+            cur.execute(
+                f"""
+                SELECT
+                    COALESCE(
+                        NULLIF(TRIM(BOTH '"' FROM (position_levels_json::jsonb->0)::text), ''),
+                        'Unknown'
+                    ) AS position_level,
+                    COUNT(*)::int AS count
+                FROM jobs
+                WHERE is_active = TRUE {mcf} {cat_filter}
+                GROUP BY 1
+                ORDER BY count DESC
+                LIMIT 20
+                """,
+                [category],
+            )
+            position_levels = [{"position_level": r[0], "count": r[1]} for r in cur.fetchall()]
+
+            cur.execute(
+                f"""
+                SELECT
+                    CASE
+                        WHEN salary_min IS NULL THEN 'Not disclosed'
+                        WHEN salary_min < 2000 THEN '$0-2k'
+                        WHEN salary_min < 4000 THEN '$2k-4k'
+                        WHEN salary_min < 6000 THEN '$4k-6k'
+                        WHEN salary_min < 8000 THEN '$6k-8k'
+                        ELSE '$8k+'
+                    END AS bucket,
+                    COUNT(*)::int AS count
+                FROM jobs
+                WHERE is_active = TRUE {mcf} {cat_filter}
+                GROUP BY 1
+                """,
+                [category],
+            )
+            by_bucket = {r[0]: r[1] for r in cur.fetchall()}
+            salary_buckets = [{"bucket": b, "count": by_bucket.get(b, 0)} for b in bucket_order]
+
+            cur.execute(
+                f"""
+                SELECT ROUND(AVG(salary_min)::numeric, 0)::int
+                FROM jobs
+                WHERE is_active = TRUE AND salary_min IS NOT NULL {mcf} {cat_filter}
+                """,
+                [category],
+            )
+            row = cur.fetchone()
+            avg_salary = row[0] if row and row[0] is not None else None
+
+        top_employment_type = employment_types[0]["employment_type"] if employment_types else None
+        top_position_level = position_levels[0]["position_level"] if position_levels else None
+
+        return {
+            "active_count": active_count,
+            "top_employment_type": top_employment_type,
+            "top_position_level": top_position_level,
+            "avg_salary": avg_salary,
+            "employment_types": employment_types,
+            "position_levels": position_levels,
+            "salary_buckets": salary_buckets,
+        }
 
     def get_jobs_by_employment_type(self, limit_days: int = 90, limit: int = 20) -> list[dict]:
         with self._cur() as cur:
             cur.execute(
                 """
-                SELECT employment_type, SUM(active_count)::int AS count
-                FROM job_daily_stats
-                WHERE stat_date >= CURRENT_DATE - %s::int
-                GROUP BY employment_type
+                SELECT
+                    COALESCE(
+                        NULLIF(TRIM(BOTH '"' FROM (employment_types_json::jsonb->0)::text), ''),
+                        'Unknown'
+                    ) AS employment_type,
+                    COUNT(*)::int AS count
+                FROM jobs
+                WHERE is_active = TRUE
+                  AND (job_source = 'mcf' OR job_source IS NULL)
+                GROUP BY 1
                 ORDER BY count DESC
                 LIMIT %s
                 """,
-                [limit_days, limit],
+                [limit],
             )
             rows = cur.fetchall()
         return [{"employment_type": r[0], "count": r[1]} for r in rows]
@@ -1061,14 +1380,20 @@ class PostgresStore(Storage):
         with self._cur() as cur:
             cur.execute(
                 """
-                SELECT position_level, SUM(active_count)::int AS count
-                FROM job_daily_stats
-                WHERE stat_date >= CURRENT_DATE - %s::int
-                GROUP BY position_level
+                SELECT
+                    COALESCE(
+                        NULLIF(TRIM(BOTH '"' FROM (position_levels_json::jsonb->0)::text), ''),
+                        'Unknown'
+                    ) AS position_level,
+                    COUNT(*)::int AS count
+                FROM jobs
+                WHERE is_active = TRUE
+                  AND (job_source = 'mcf' OR job_source IS NULL)
+                GROUP BY 1
                 ORDER BY count DESC
                 LIMIT %s
                 """,
-                [limit_days, limit],
+                [limit],
             )
             rows = cur.fetchall()
         return [{"position_level": r[0], "count": r[1]} for r in rows]

@@ -994,59 +994,199 @@ class DuckDBStore(Storage):
         ).fetchone()
         jobs_with_embeddings = row[0] if row else 0
 
+        row = self._con.execute(
+            """
+            SELECT COUNT(*) FROM jobs
+            WHERE is_active = TRUE
+              AND (job_source = 'mcf' OR job_source IS NULL)
+              AND (categories_json IS NULL OR categories_json = '' OR categories_json = '[]')
+            """
+        ).fetchone()
+        jobs_needing_backfill = row[0] if row else 0
+
         return {
             "total_jobs": total,
             "active_jobs": active,
             "inactive_jobs": inactive,
             "by_source": by_source,
             "jobs_with_embeddings": jobs_with_embeddings,
+            "jobs_needing_backfill": jobs_needing_backfill,
         }
 
-    def get_jobs_over_time(self, bucket_days: int = 1, limit_days: int = 90) -> list[dict]:
-        from datetime import timedelta
-
-        cutoff = _utcnow() - timedelta(days=limit_days)
-        rows = self._con.execute(
-            """
-            SELECT CAST(first_seen_at AS DATE) AS day, COUNT(*) AS count
-            FROM jobs
-            WHERE first_seen_at IS NOT NULL
-              AND first_seen_at >= ?
-              AND (job_source = 'mcf' OR job_source IS NULL)
-            GROUP BY CAST(first_seen_at AS DATE)
-            ORDER BY day ASC
-            """,
-            [cutoff],
-        ).fetchall()
-        daily = [{"date": str(r[0]), "count": r[1]} for r in rows]
-        cumulative = 0
-        for d in daily:
-            cumulative += d["count"]
-            d["cumulative"] = cumulative
-        return daily
-
-    def get_jobs_over_time_by_posted(self, limit_days: int = 90) -> list[dict]:
+    def get_jobs_over_time_posted_and_removed(self, limit_days: int = 90) -> list[dict]:
         from datetime import timedelta
 
         cutoff = _utcnow().date() - timedelta(days=limit_days)
+        mcf = "AND (job_source = 'mcf' OR job_source IS NULL)"
+
         rows = self._con.execute(
-            """
-            SELECT CAST(posted_date AS DATE) AS day, COUNT(*) AS count
+            f"""
+            SELECT CAST(COALESCE(posted_date, first_seen_at) AS DATE) AS day, COUNT(*) AS count
             FROM jobs
-            WHERE posted_date IS NOT NULL
-              AND CAST(posted_date AS DATE) >= ?
-              AND (job_source = 'mcf' OR job_source IS NULL)
-            GROUP BY CAST(posted_date AS DATE)
-            ORDER BY day ASC
+            WHERE is_active = TRUE
+              AND (posted_date IS NOT NULL OR first_seen_at IS NOT NULL)
+              AND CAST(COALESCE(posted_date, first_seen_at) AS DATE) >= ? {mcf}
+            GROUP BY CAST(COALESCE(posted_date, first_seen_at) AS DATE)
             """,
             [cutoff],
         ).fetchall()
-        daily = [{"date": str(r[0]), "count": r[1]} for r in rows]
-        cumulative = 0
-        for d in daily:
-            cumulative += d["count"]
-            d["cumulative"] = cumulative
-        return daily
+        posted_rows = {str(r[0]): r[1] for r in rows}
+
+        rows = self._con.execute(
+            f"""
+            SELECT CAST(COALESCE(last_seen_at, first_seen_at) AS DATE) AS day, COUNT(*) AS count
+            FROM jobs
+            WHERE is_active = FALSE
+              AND (last_seen_at IS NOT NULL OR first_seen_at IS NOT NULL)
+              AND CAST(COALESCE(last_seen_at, first_seen_at) AS DATE) >= ? {mcf}
+            GROUP BY CAST(COALESCE(last_seen_at, first_seen_at) AS DATE)
+            """,
+            [cutoff],
+        ).fetchall()
+        removed_rows = {str(r[0]): r[1] for r in rows}
+
+        all_dates = sorted(set(posted_rows.keys()) | set(removed_rows.keys()))
+        cumulative_posted = 0
+        cumulative_removed = 0
+        result = []
+        for d in all_dates:
+            p = posted_rows.get(d, 0)
+            r = removed_rows.get(d, 0)
+            cumulative_posted += p
+            cumulative_removed += r
+            result.append({
+                "date": d,
+                "posted_count": p,
+                "removed_count": r,
+                "cumulative_posted": cumulative_posted,
+                "cumulative_removed": cumulative_removed,
+            })
+        return result
+
+    def get_active_jobs_over_time(self, limit_days: int = 90) -> list[dict]:
+        from datetime import timedelta
+
+        cutoff = _utcnow().date() - timedelta(days=limit_days)
+        today = _utcnow().date()
+
+        try:
+            rows = self._con.execute(
+                """
+                SELECT stat_date AS day, SUM(active_count)::INTEGER AS active_count
+                FROM job_daily_stats
+                WHERE stat_date >= ? AND category != 'Unknown'
+                GROUP BY stat_date
+                ORDER BY stat_date ASC
+                """,
+                [cutoff],
+            ).fetchall()
+        except duckdb.ProgrammingError:
+            rows = []
+
+        if rows:
+            return [{"date": str(r[0]), "active_count": r[1]} for r in rows]
+
+        # Fallback: compute from jobs table when job_daily_stats is empty
+        result = []
+        for i in range(limit_days + 1):
+            d = cutoff + timedelta(days=i)
+            if d > today:
+                break
+            row = self._con.execute(
+                """
+                SELECT COUNT(*)::INTEGER FROM jobs j
+                WHERE (j.job_source = 'mcf' OR j.job_source IS NULL)
+                  AND j.posted_date IS NOT NULL
+                  AND CAST(j.posted_date AS DATE) <= ?
+                  AND (j.is_active = TRUE
+                       OR (j.last_seen_at IS NOT NULL AND CAST(j.last_seen_at AS DATE) > ?))
+                """,
+                [d, d],
+            ).fetchone()
+            result.append({"date": str(d), "active_count": row[0] if row else 0})
+        return result
+
+    def backfill_job_daily_stats(self, limit_days: int = 365) -> dict:
+        """One-time backfill of job_daily_stats from jobs table for historical dates."""
+        from datetime import timedelta
+
+        today = _utcnow().date()
+        if limit_days <= 0:
+            try:
+                row = self._con.execute(
+                    """
+                    SELECT MIN(LEAST(
+                        COALESCE(CAST(posted_date AS DATE), DATE '9999-12-31'),
+                        COALESCE(CAST(first_seen_at AS DATE), DATE '9999-12-31'),
+                        COALESCE(CAST(last_seen_at AS DATE), DATE '9999-12-31')
+                    ))
+                    FROM jobs
+                    WHERE (job_source = 'mcf' OR job_source IS NULL)
+                    """
+                ).fetchone()
+            except duckdb.ProgrammingError:
+                row = None
+            start_date = row[0] if row and row[0] and str(row[0]) != "9999-12-31" else today
+        else:
+            start_date = today - timedelta(days=limit_days)
+
+        cat_ex = "COALESCE(NULLIF(TRIM(COALESCE(json_extract_string(categories_json, '$[0]'), '')), ''), 'Unknown')"
+        et_ex = "COALESCE(NULLIF(TRIM(COALESCE(json_extract_string(employment_types_json, '$[0]'), '')), ''), 'Unknown')"
+        pl_ex = "COALESCE(NULLIF(TRIM(COALESCE(json_extract_string(position_levels_json, '$[0]'), '')), ''), 'Unknown')"
+        mcf = "AND (job_source = 'mcf' OR job_source IS NULL)"
+
+        days_processed = 0
+        d = start_date
+        while d <= today:
+            try:
+                self._con.execute(
+                    f"""
+                    INSERT INTO job_daily_stats
+                        (stat_date, category, employment_type, position_level, active_count, added_count, removed_count)
+                    SELECT
+                        ? AS stat_date,
+                        {cat_ex} AS category,
+                        {et_ex} AS employment_type,
+                        {pl_ex} AS position_level,
+                        COUNT(*) FILTER (
+                            WHERE posted_date IS NOT NULL AND CAST(posted_date AS DATE) <= ?
+                            AND (is_active = TRUE OR (last_seen_at IS NOT NULL AND CAST(last_seen_at AS DATE) > ?))
+                        )::INTEGER AS active_count,
+                        COUNT(*) FILTER (
+                            WHERE (posted_date IS NOT NULL AND CAST(posted_date AS DATE) = ?)
+                            OR (first_seen_at IS NOT NULL AND CAST(first_seen_at AS DATE) = ?)
+                        )::INTEGER AS added_count,
+                        COUNT(*) FILTER (
+                            WHERE last_seen_at IS NOT NULL AND CAST(last_seen_at AS DATE) = ? AND is_active = FALSE
+                        )::INTEGER AS removed_count
+                    FROM jobs
+                    WHERE 1=1 {mcf}
+                    GROUP BY 2, 3, 4
+                    HAVING COUNT(*) FILTER (
+                        WHERE posted_date IS NOT NULL AND CAST(posted_date AS DATE) <= ?
+                        AND (is_active = TRUE OR (last_seen_at IS NOT NULL AND CAST(last_seen_at AS DATE) > ?))
+                    ) > 0
+                    OR COUNT(*) FILTER (
+                        WHERE (posted_date IS NOT NULL AND CAST(posted_date AS DATE) = ?)
+                        OR (first_seen_at IS NOT NULL AND CAST(first_seen_at AS DATE) = ?)
+                    ) > 0
+                    OR COUNT(*) FILTER (
+                        WHERE last_seen_at IS NOT NULL AND CAST(last_seen_at AS DATE) = ? AND is_active = FALSE
+                    ) > 0
+                    ON CONFLICT (stat_date, category, employment_type, position_level)
+                    DO UPDATE SET
+                        active_count = EXCLUDED.active_count,
+                        added_count = EXCLUDED.added_count,
+                        removed_count = EXCLUDED.removed_count
+                    """,
+                    [d, d, d, d, d, d, d, d, d, d, d],
+                )
+                days_processed += 1
+            except duckdb.ProgrammingError:
+                pass
+            d += timedelta(days=1)
+
+        return {"rows_upserted": days_processed, "date_start": str(start_date), "date_end": str(today)}
 
     def update_daily_stats(self, run_id: str) -> None:
         """Upsert today's aggregated stats by category x employment_type x position_level."""
@@ -1117,31 +1257,206 @@ class DuckDBStore(Storage):
         try:
             rows = self._con.execute(
                 """
-                SELECT category, SUM(active_count)::INTEGER AS count
-                FROM job_daily_stats
-                WHERE stat_date >= CURRENT_DATE - ?
-                GROUP BY category
+                SELECT
+                    COALESCE(
+                        NULLIF(TRIM(COALESCE(json_extract_string(categories_json, '$[0]'), '')), ''),
+                        'Unknown'
+                    ) AS category,
+                    COUNT(*)::INTEGER AS count
+                FROM jobs
+                WHERE is_active = TRUE
+                  AND (job_source = 'mcf' OR job_source IS NULL)
+                GROUP BY 1
                 ORDER BY count DESC
                 LIMIT ?
                 """,
-                [limit_days, limit],
+                [limit],
             ).fetchall()
         except duckdb.ProgrammingError:
             return []
         return [{"category": r[0], "count": r[1]} for r in rows]
 
+    def get_category_trends(self, category: str, limit_days: int = 90) -> list[dict]:
+        from datetime import timedelta
+
+        cutoff = _utcnow().date() - timedelta(days=limit_days)
+        today = _utcnow().date()
+        cat_extract = "COALESCE(NULLIF(TRIM(COALESCE(json_extract_string(categories_json, '$[0]'), '')), ''), 'Unknown')"
+
+        try:
+            rows = self._con.execute(
+                """
+                SELECT stat_date AS day,
+                       SUM(active_count)::INTEGER AS active_count,
+                       SUM(added_count)::INTEGER AS added_count,
+                       SUM(removed_count)::INTEGER AS removed_count
+                FROM job_daily_stats
+                WHERE category = ? AND stat_date >= ?
+                GROUP BY stat_date
+                ORDER BY stat_date ASC
+                """,
+                [category, cutoff],
+            ).fetchall()
+        except duckdb.ProgrammingError:
+            rows = []
+
+        if rows:
+            return [
+                {"date": str(r[0]), "active_count": r[1], "added_count": r[2], "removed_count": r[3]}
+                for r in rows
+            ]
+
+        # Fallback: compute from jobs table for this category
+        result = []
+        for i in range(limit_days + 1):
+            d = cutoff + timedelta(days=i)
+            if d > today:
+                break
+            row = self._con.execute(
+                f"""
+                SELECT COUNT(*)::INTEGER FROM jobs j
+                WHERE (j.job_source = 'mcf' OR j.job_source IS NULL)
+                  AND {cat_extract} = ?
+                  AND j.posted_date IS NOT NULL
+                  AND CAST(j.posted_date AS DATE) <= ?
+                  AND (j.is_active = TRUE
+                       OR (j.last_seen_at IS NOT NULL AND CAST(j.last_seen_at AS DATE) > ?))
+                """,
+                [category, d, d],
+            ).fetchone()
+            result.append({"date": str(d), "active_count": row[0] if row else 0, "added_count": 0, "removed_count": 0})
+        return result
+
+    def get_category_stats(self, category: str) -> dict:
+        cat_filter = """
+            AND COALESCE(
+                NULLIF(TRIM(COALESCE(json_extract_string(categories_json, '$[0]'), '')), ''),
+                'Unknown'
+            ) = ?
+        """
+        mcf = "AND (job_source = 'mcf' OR job_source IS NULL)"
+        bucket_order = ["$0-2k", "$2k-4k", "$4k-6k", "$6k-8k", "$8k+", "Not disclosed"]
+
+        try:
+            row = self._con.execute(
+                f"""
+                SELECT COUNT(*)::INTEGER
+                FROM jobs
+                WHERE is_active = TRUE {mcf} {cat_filter}
+                """,
+                [category],
+            ).fetchone()
+            active_count = row[0] if row else 0
+
+            rows = self._con.execute(
+                f"""
+                SELECT
+                    COALESCE(
+                        NULLIF(TRIM(COALESCE(json_extract_string(employment_types_json, '$[0]'), '')), ''),
+                        'Unknown'
+                    ) AS employment_type,
+                    COUNT(*)::INTEGER AS count
+                FROM jobs
+                WHERE is_active = TRUE {mcf} {cat_filter}
+                GROUP BY 1
+                ORDER BY count DESC
+                LIMIT 20
+                """,
+                [category],
+            ).fetchall()
+            employment_types = [{"employment_type": r[0], "count": r[1]} for r in rows]
+
+            rows = self._con.execute(
+                f"""
+                SELECT
+                    COALESCE(
+                        NULLIF(TRIM(COALESCE(json_extract_string(position_levels_json, '$[0]'), '')), ''),
+                        'Unknown'
+                    ) AS position_level,
+                    COUNT(*)::INTEGER AS count
+                FROM jobs
+                WHERE is_active = TRUE {mcf} {cat_filter}
+                GROUP BY 1
+                ORDER BY count DESC
+                LIMIT 20
+                """,
+                [category],
+            ).fetchall()
+            position_levels = [{"position_level": r[0], "count": r[1]} for r in rows]
+
+            rows = self._con.execute(
+                f"""
+                SELECT
+                    CASE
+                        WHEN salary_min IS NULL THEN 'Not disclosed'
+                        WHEN salary_min < 2000 THEN '$0-2k'
+                        WHEN salary_min < 4000 THEN '$2k-4k'
+                        WHEN salary_min < 6000 THEN '$4k-6k'
+                        WHEN salary_min < 8000 THEN '$6k-8k'
+                        ELSE '$8k+'
+                    END AS bucket,
+                    COUNT(*)::INTEGER AS count
+                FROM jobs
+                WHERE is_active = TRUE {mcf} {cat_filter}
+                GROUP BY 1
+                """,
+                [category],
+            ).fetchall()
+            by_bucket = {r[0]: r[1] for r in rows}
+            salary_buckets = [{"bucket": b, "count": by_bucket.get(b, 0)} for b in bucket_order]
+
+            row = self._con.execute(
+                f"""
+                SELECT ROUND(AVG(salary_min), 0)::INTEGER
+                FROM jobs
+                WHERE is_active = TRUE AND salary_min IS NOT NULL {mcf} {cat_filter}
+                """,
+                [category],
+            ).fetchone()
+            avg_salary = row[0] if row and row[0] is not None else None
+
+        except duckdb.ProgrammingError:
+            return {
+                "active_count": 0,
+                "top_employment_type": None,
+                "top_position_level": None,
+                "avg_salary": None,
+                "employment_types": [],
+                "position_levels": [],
+                "salary_buckets": [],
+            }
+
+        top_employment_type = employment_types[0]["employment_type"] if employment_types else None
+        top_position_level = position_levels[0]["position_level"] if position_levels else None
+
+        return {
+            "active_count": active_count,
+            "top_employment_type": top_employment_type,
+            "top_position_level": top_position_level,
+            "avg_salary": avg_salary,
+            "employment_types": employment_types,
+            "position_levels": position_levels,
+            "salary_buckets": salary_buckets,
+        }
+
     def get_jobs_by_employment_type(self, limit_days: int = 90, limit: int = 20) -> list[dict]:
         try:
             rows = self._con.execute(
                 """
-                SELECT employment_type, SUM(active_count)::INTEGER AS count
-                FROM job_daily_stats
-                WHERE stat_date >= CURRENT_DATE - ?
-                GROUP BY employment_type
+                SELECT
+                    COALESCE(
+                        NULLIF(TRIM(COALESCE(json_extract_string(employment_types_json, '$[0]'), '')), ''),
+                        'Unknown'
+                    ) AS employment_type,
+                    COUNT(*)::INTEGER AS count
+                FROM jobs
+                WHERE is_active = TRUE
+                  AND (job_source = 'mcf' OR job_source IS NULL)
+                GROUP BY 1
                 ORDER BY count DESC
                 LIMIT ?
                 """,
-                [limit_days, limit],
+                [limit],
             ).fetchall()
         except duckdb.ProgrammingError:
             return []
@@ -1151,14 +1466,20 @@ class DuckDBStore(Storage):
         try:
             rows = self._con.execute(
                 """
-                SELECT position_level, SUM(active_count)::INTEGER AS count
-                FROM job_daily_stats
-                WHERE stat_date >= CURRENT_DATE - ?
-                GROUP BY position_level
+                SELECT
+                    COALESCE(
+                        NULLIF(TRIM(COALESCE(json_extract_string(position_levels_json, '$[0]'), '')), ''),
+                        'Unknown'
+                    ) AS position_level,
+                    COUNT(*)::INTEGER AS count
+                FROM jobs
+                WHERE is_active = TRUE
+                  AND (job_source = 'mcf' OR job_source IS NULL)
+                GROUP BY 1
                 ORDER BY count DESC
                 LIMIT ?
                 """,
-                [limit_days, limit],
+                [limit],
             ).fetchall()
         except duckdb.ProgrammingError:
             return []

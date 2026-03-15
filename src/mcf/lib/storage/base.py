@@ -97,6 +97,14 @@ class Storage(ABC):
         """Recompute job_daily_stats for today from the current active job roster."""
         ...
 
+    def backfill_job_daily_stats(self, limit_days: int = 365) -> dict:
+        """One-time backfill of job_daily_stats from jobs table for historical dates.
+
+        Computes active_count, added_count, removed_count per (stat_date, category, employment_type, position_level)
+        for each date in the range. Returns {rows_inserted, date_start, date_end}.
+        """
+        raise NotImplementedError
+
     @abstractmethod
     def delete_inactive_job_embeddings(self) -> int:
         """Delete embeddings for inactive jobs with no user interactions.
@@ -254,15 +262,24 @@ class Storage(ABC):
     @abstractmethod
     def get_dashboard_summary(self) -> dict: ...
 
-    @abstractmethod
-    def get_jobs_over_time(self, bucket_days: int = 1, limit_days: int = 90) -> list[dict]: ...
+    def get_jobs_over_time_posted_and_removed(self, limit_days: int = 90) -> list[dict]:
+        """Jobs by posted_date (active) and by last_seen_at (removed). Returns list of {date, posted_count, removed_count, cumulative_posted, cumulative_removed}."""
+        raise NotImplementedError
 
-    def get_jobs_over_time_by_posted(self, limit_days: int = 90) -> list[dict]:
-        """Jobs grouped by MCF posted_date (metadata.newPostingDate). Sparse until backfilled."""
+    def get_active_jobs_over_time(self, limit_days: int = 90) -> list[dict]:
+        """Total active jobs per day from job_daily_stats. Returns list of {date, active_count}."""
         raise NotImplementedError
 
     @abstractmethod
     def get_jobs_by_category(self, limit_days: int = 90, limit: int = 30) -> list[dict]: ...
+
+    def get_category_trends(self, category: str, limit_days: int = 90) -> list[dict]:
+        """Trend data for a category from job_daily_stats. Returns [{date, active_count, added_count, removed_count}]."""
+        raise NotImplementedError
+
+    def get_category_stats(self, category: str) -> dict:
+        """Stats for a category: active_count, employment_types, position_levels, salary_buckets, avg_salary, etc."""
+        raise NotImplementedError
 
     @abstractmethod
     def get_jobs_by_employment_type(self, limit_days: int = 90, limit: int = 20) -> list[dict]: ...

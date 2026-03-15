@@ -144,39 +144,57 @@ export const dashboardApi = {
       inactive_jobs: number
       by_source: Record<string, number>
       jobs_with_embeddings: number
+      jobs_needing_backfill: number
     }
   },
-  getJobsOverTime: async (limitDays = 90) => {
-    const response = await api.get('/api/dashboard/jobs-over-time', {
+  getJobsOverTimePostedAndRemoved: async (limitDays = 90) => {
+    const response = await api.get('/api/dashboard/jobs-over-time-posted-and-removed', {
       params: { limit_days: limitDays },
-    })
-    return response.data as Array<{ date: string; count: number; cumulative: number }>
-  },
-  getJobsOverTimeByPosted: async (limitDays = 90) => {
-    const response = await api.get('/api/dashboard/jobs-over-time-by-posted', {
-      params: { limit_days: limitDays },
-    })
-    return response.data as Array<{ date: string; count: number; cumulative: number }>
-  },
-  getCrawlRuns: async (limit = 50) => {
-    const response = await api.get('/api/dashboard/crawl-runs', {
-      params: { limit },
     })
     return response.data as Array<{
-      run_id: string
-      started_at: string
-      finished_at: string | null
-      total_seen: number
-      added: number
-      maintained: number
-      removed: number
+      date: string
+      posted_count: number
+      removed_count: number
+      cumulative_posted: number
+      cumulative_removed: number
     }>
+  },
+  getActiveJobsOverTime: async (limitDays = 90) => {
+    const response = await api.get('/api/dashboard/active-jobs-over-time', {
+      params: { limit_days: limitDays },
+    })
+    return response.data as Array<{ date: string; active_count: number }>
   },
   getJobsByCategory: async (limitDays = 90, limit = 30) => {
     const response = await api.get('/api/dashboard/jobs-by-category', {
       params: { limit_days: limitDays, limit },
     })
     return response.data as Array<{ category: string; count: number }>
+  },
+  getCategoryTrends: async (category: string, limitDays = 90) => {
+    const response = await api.get('/api/dashboard/category-trends', {
+      params: { category, limit_days: limitDays },
+    })
+    return response.data as Array<{
+      date: string
+      active_count: number
+      added_count: number
+      removed_count: number
+    }>
+  },
+  getCategoryStats: async (category: string) => {
+    const response = await api.get('/api/dashboard/category-stats', {
+      params: { category },
+    })
+    return response.data as {
+      active_count: number
+      top_employment_type: string | null
+      top_position_level: string | null
+      avg_salary: number | null
+      employment_types: Array<{ employment_type: string; count: number }>
+      position_levels: Array<{ position_level: string; count: number }>
+      salary_buckets: Array<{ bucket: string; count: number }>
+    }
   },
   getJobsByEmploymentType: async (limitDays = 90, limit = 20) => {
     const response = await api.get('/api/dashboard/jobs-by-employment-type', {
