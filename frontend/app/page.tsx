@@ -1,18 +1,95 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { profileApi } from '@/lib/api'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Profile } from '@/lib/types'
 import AuthGate from './components/AuthGate'
-import Nav from './components/Nav'
-import ResumeTab from './components/ResumeTab'
-import TasteTab from './components/TasteTab'
+import { Layout } from './components/layout'
+import NavUserActions from './components/NavUserActions'
+import { PageHeader, Card, CardBody, EmptyState, LoadingState } from '@/components/design'
+import { Button } from '@/components/ui/button'
+import { MatchesErrorBoundary } from './MatchesErrorBoundary'
 import Spinner from './components/Spinner'
-import toast, { Toaster } from 'react-hot-toast'
-import { Upload, RefreshCw } from 'lucide-react'
+import { toast } from 'sonner'
+import { Upload, RefreshCw, FileWarning } from 'lucide-react'
+
+const LazyResumeTab = dynamic(() => import('./components/ResumeTab'), {
+  ssr: false,
+  loading: () => <LoadingState variant="matches" count={3} />,
+})
+
+const LazyTasteTab = dynamic(() => import('./components/TasteTab'), {
+  ssr: false,
+  loading: () => <LoadingState variant="matches" count={3} />,
+})
 
 type Tab = 'resume' | 'taste'
+
+const TABS = [
+  { id: 'resume' as const, label: 'Resume Matches' },
+  { id: 'taste' as const, label: 'Taste Matches' },
+]
+
+function MatchesHeaderActions({
+  profile,
+  loadingProfile,
+  processingResume,
+  onUploadClick,
+  onProcessResume,
+}: {
+  profile: Profile | null
+  loadingProfile: boolean
+  processingResume: boolean
+  onUploadClick: () => void
+  onProcessResume: () => void
+  fileInputRef?: React.RefObject<HTMLInputElement | null>
+}) {
+  if (loadingProfile || !isSupabaseConfigured) return null
+
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      {profile?.profile ? (
+        <>
+          <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+            Resume ready
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onUploadClick}
+            disabled={processingResume}
+            className="text-slate-600 dark:text-slate-400"
+          >
+            <Upload className="size-4" />
+            Replace
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onProcessResume}
+            disabled={processingResume}
+            className="text-slate-600 dark:text-slate-400"
+          >
+            <RefreshCw className="size-4" />
+            Re-process
+          </Button>
+        </>
+      ) : (
+        <Button
+          size="sm"
+          onClick={onUploadClick}
+          disabled={processingResume}
+        >
+          <Upload className="size-4" />
+          {processingResume ? 'Processing…' : 'Upload Resume'}
+        </Button>
+      )}
+      {isSupabaseConfigured && <NavUserActions />}
+    </div>
+  )
+}
 
 function App() {
   const [tab, setTab] = useState<Tab>('resume')
@@ -20,6 +97,8 @@ function App() {
   const [loadingProfile, setLoadingProfile] = useState(true)
   const [processingResume, setProcessingResume] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const onUploadClick = useCallback(() => fileInputRef.current?.click?.(), [])
+  const handleTabClick = useCallback((id: Tab) => setTab(id), [])
 
   useEffect(() => {
     profileApi
@@ -33,10 +112,9 @@ function App() {
             const updated = await profileApi.get()
             setProfile(updated)
             toast.success('Resume processed automatically!')
-          } catch (err: any) {
-            toast.error(
-              err.response?.data?.detail || 'Auto-processing resume failed. Upload your resume to continue.',
-            )
+          } catch (err: unknown) {
+            const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+            toast.error(detail || 'Auto-processing resume failed. Upload your resume to continue.')
           } finally {
             setProcessingResume(false)
           }
@@ -53,8 +131,9 @@ function App() {
       const updated = await profileApi.get()
       setProfile(updated)
       toast.success('Resume processed!')
-    } catch (err: any) {
-      toast.error(err.response?.data?.detail || 'Failed to process resume')
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast.error(detail || 'Failed to process resume')
     } finally {
       setProcessingResume(false)
     }
@@ -71,9 +150,10 @@ function App() {
       const updated = await profileApi.get()
       setProfile(updated)
       toast.success('Resume uploaded and processed!')
-    } catch (err: any) {
-      const status = err.response?.status
-      const detail = err.response?.data?.detail
+    } catch (err: unknown) {
+      const errObj = err as { response?: { status?: number; data?: { detail?: string } }; message?: string }
+      const status = errObj.response?.status
+      const detail = errObj.response?.data?.detail
       const msg =
         status === 401
           ? 'Session expired. Please sign in again.'
@@ -82,139 +162,90 @@ function App() {
             : status === 500
               ? (detail || 'Server error. Check Railway logs for details.')
               : detail ||
-                (err.message?.includes('Network') || !err.response
+                (errObj.message?.includes('Network') || !errObj.response
                   ? 'Network error. In Vercel, set NEXT_PUBLIC_API_URL to your Railway URL and redeploy.'
                   : 'Upload failed. Try again.')
       toast.error(msg)
-      console.error('[Upload error]', {
-        status,
-        detail,
-        message: err.message,
-        apiUrl: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000 (fallback — set NEXT_PUBLIC_API_URL in Vercel)',
-        err,
-      })
     } finally {
       setProcessingResume(false)
     }
   }
 
-  const handleSignOut = async () => {
-    if (isSupabaseConfigured) {
-      await supabase.auth.signOut()
-    }
-  }
-
-  const navRightSlot = (
-    <div className="flex items-center gap-3">
-      {!loadingProfile && (
-        <>
-          {profile?.profile ? (
-            <div className="flex items-center gap-2">
-              <span className="text-xs px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 font-medium">
-                Resume ready
-              </span>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={processingResume}
-                title="Upload a new resume (PDF or DOCX)"
-                className="text-xs text-slate-400 hover:text-white transition-colors flex items-center gap-1"
-              >
-                <Upload size={14} />
-                Replace
-              </button>
-              <button
-                onClick={handleProcessResume}
-                disabled={processingResume}
-                title="Re-process the server-side resume file"
-                className="text-xs text-slate-400 hover:text-white transition-colors flex items-center gap-1"
-              >
-                <RefreshCw size={14} />
-                Re-process
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={processingResume}
-              className="text-xs px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium
-                hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors
-                flex items-center gap-2"
-            >
-              <Upload size={14} />
-              {processingResume ? 'Processing…' : 'Upload Resume'}
-            </button>
-          )}
-
-          {isSupabaseConfigured && (
-            <button
-              onClick={handleSignOut}
-              className="text-xs text-slate-400 hover:text-white transition-colors"
-              title="Sign out"
-            >
-              Sign out
-            </button>
-          )}
-        </>
-      )}
-    </div>
-  )
+  const needsResume = !loadingProfile && profile && !profile.resume_exists && !profile.profile
 
   return (
-    <div className="min-h-screen bg-slate-50 relative">
-      <Toaster position="top-right" />
+    <Layout
+      userSlot={
+        <MatchesHeaderActions
+          profile={profile}
+          loadingProfile={loadingProfile}
+          processingResume={processingResume}
+          onUploadClick={onUploadClick}
+          onProcessResume={handleProcessResume}
+          fileInputRef={fileInputRef}
+        />
+      }
+    >
+      <MatchesErrorBoundary>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.docx"
+          className="hidden"
+          onChange={handleFileUpload}
+        />
 
-      {processingResume && (
-        <div className="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-center justify-center">
-          <div className="flex flex-col items-center gap-4">
-            <Spinner size="lg" />
-            <p className="text-slate-600 font-medium">Processing resume…</p>
-          </div>
-        </div>
-      )}
-
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".pdf,.docx"
-        className="hidden"
-        onChange={handleFileUpload}
-      />
-
-      <Nav rightSlot={navRightSlot} />
-
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
-        {/* Resume status card */}
-        {!loadingProfile && profile && !profile.resume_exists && !profile.profile && (
-          <div className="mb-6 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 text-sm text-amber-800">
-            No resume found. Click <strong>Upload Resume</strong> in the nav to get started.
+        {processingResume && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/80 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-4">
+              <Spinner size="lg" />
+              <p className="text-slate-600 font-medium dark:text-slate-400">Processing resume…</p>
+            </div>
           </div>
         )}
 
-        {/* Tab bar */}
-        <div className="flex gap-1 p-1 bg-slate-200/60 rounded-lg w-fit mb-8">
-          {[
-            { id: 'resume' as const, label: 'Resume Matches', accent: 'indigo' },
-            { id: 'taste' as const, label: 'Taste Matches', accent: 'violet' },
-          ].map(({ id, label, accent }) => (
-            <button
-              key={id}
-              onClick={() => setTab(id)}
-              className={`px-5 py-2.5 text-sm font-medium rounded-md transition-colors
-                ${tab === id
-                  ? accent === 'indigo'
-                    ? 'bg-white text-indigo-600 shadow-sm'
-                    : 'bg-white text-violet-600 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        {needsResume && (
+          <Card className="mb-6 border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20">
+            <CardBody className="flex flex-row items-center gap-4">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900/50 dark:text-amber-400">
+                <FileWarning className="size-5" />
+              </div>
+              <p className="text-sm text-amber-800 dark:text-amber-200">
+                No resume found. Click <strong>Upload Resume</strong> in the header to get started.
+              </p>
+            </CardBody>
+          </Card>
+        )}
 
-        {tab === 'resume' && <ResumeTab />}
-        {tab === 'taste' && <TasteTab />}
-      </main>
-    </div>
+        <PageHeader
+          title="Job Matches"
+          subtitle="Find jobs that fit your resume and preferences"
+          action={
+            <div className="flex gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-700">
+              {TABS.map(({ id, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => handleTabClick(id)}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 ${
+                    tab === id
+                      ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-600 dark:text-slate-100'
+                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          }
+        />
+
+        <div className="mt-6">
+          {tab === 'resume' && <LazyResumeTab />}
+          {tab === 'taste' && <LazyTasteTab />}
+        </div>
+      </MatchesErrorBoundary>
+    </Layout>
   )
 }
 

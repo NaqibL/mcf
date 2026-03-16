@@ -2,10 +2,19 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { jobsApi, matchesApi, profileApi, discoverApi } from '@/lib/api'
+import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue'
 import type { Match, DiscoverStats } from '@/lib/types'
 import { MatchCard } from './JobCard'
+import {
+  Card,
+  CardBody,
+  EmptyState,
+  LoadingState,
+} from '@/components/design'
+import { Button } from '@/components/ui/button'
 import Spinner from './Spinner'
-import toast from 'react-hot-toast'
+import { toast } from 'sonner'
+import { RefreshCw, Sparkles } from 'lucide-react'
 
 const JOBS_PER_PAGE = 25
 const TUTORIAL_STORAGE_KEY = 'mcf_has_seen_resume_tutorial'
@@ -23,7 +32,8 @@ export default function ResumeTab() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [computing, setComputing] = useState(false)
   const [ratingUuids, setRatingUuids] = useState<Set<string>>(new Set())
-  const [filters, setFilters] = useState<Filters>({ minSimilarity: 0, maxDaysOld: null })
+  const [localFilters, setLocalFilters] = useState<Filters>({ minSimilarity: 0, maxDaysOld: null })
+  const debouncedFilters = useDebouncedValue(localFilters, 300)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [sessionOffset, setSessionOffset] = useState(0)
   const [hasSeenTutorial, setHasSeenTutorial] = useState(false)
@@ -66,8 +76,8 @@ export default function ResumeTab() {
           true,
           JOBS_PER_PAGE,
           offset,
-          filters.minSimilarity / 100,
-          filters.maxDaysOld ?? undefined,
+          debouncedFilters.minSimilarity / 100,
+          debouncedFilters.maxDaysOld ?? undefined,
           true,
           append ? (sid ?? undefined) : undefined,
         )
@@ -82,14 +92,14 @@ export default function ResumeTab() {
           setJobs((prev) => [...prev, ...data.matches])
         }
         setHasMore(data.has_more)
-      } catch (err: any) {
+      } catch {
         toast.error('Failed to load jobs. Is the API server running?')
       } finally {
         setLoading(false)
         setLoadingMore(false)
       }
     },
-    [filters.minSimilarity, filters.maxDaysOld],
+    [debouncedFilters.minSimilarity, debouncedFilters.maxDaysOld],
   )
 
   useEffect(() => {
@@ -97,23 +107,24 @@ export default function ResumeTab() {
     loadStats()
   }, [loadJobs, loadStats])
 
-  const rate = async (uuid: string, interactionType: 'interested' | 'not_interested') => {
+  const rate = useCallback(async (uuid: string, interactionType: string) => {
+    const type = interactionType as 'interested' | 'not_interested'
     setRatingUuids((prev) => new Set(prev).add(uuid))
     setJobs((prev) => prev.filter((j) => j.job_uuid !== uuid))
 
     try {
-      await jobsApi.markInteraction(uuid, interactionType)
+      await jobsApi.markInteraction(uuid, type)
       setStats((prev) =>
         prev
           ? {
               ...prev,
-              [interactionType]: prev[interactionType] + 1,
+              [type]: prev[type] + 1,
               total_rated: prev.total_rated + 1,
               unrated: Math.max(0, prev.unrated - 1),
             }
           : prev,
       )
-    } catch (err: any) {
+    } catch {
       toast.error('Failed to save rating')
       loadJobs()
       loadStats()
@@ -124,7 +135,7 @@ export default function ResumeTab() {
         return next
       })
     }
-  }
+  }, [loadJobs, loadStats])
 
   const handleComputeTaste = async () => {
     setComputing(true)
@@ -134,9 +145,9 @@ export default function ResumeTab() {
         `Taste profile updated from ${result.interested} interested jobs! Switch to Taste tab for personalised recommendations.`,
         { duration: 5000 },
       )
-    } catch (err: any) {
-      const detail = err.response?.data?.detail || err.message
-      toast.error(detail)
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast.error(detail || 'Failed to update taste profile')
     } finally {
       setComputing(false)
     }
@@ -152,202 +163,204 @@ export default function ResumeTab() {
       )
       loadJobs()
       loadStats()
-    } catch (err: any) {
-      toast.error(err.response?.data?.detail || 'Reset failed')
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast.error(detail || 'Reset failed')
     }
   }
+
+  const handleLoadMore = useCallback(() => loadJobs(true), [loadJobs])
+
+  const handleRefresh = useCallback(() => {
+    sessionRef.current = { sessionId: null, sessionOffset: 0 }
+    setSessionId(null)
+    setSessionOffset(0)
+    loadJobs(false)
+  }, [loadJobs])
 
   const interested = stats?.interested ?? 0
   const hasEnoughRatings = interested >= 3
 
   return (
     <div className="space-y-6">
-      {/* Stats + Update Taste Profile bar */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex gap-8">
-          <div>
-            <div className="text-2xl font-semibold text-emerald-600 tabular-nums">{stats?.interested ?? '—'}</div>
-            <div className="text-sm text-slate-500">Interested</div>
-          </div>
-          <div>
-            <div className="text-2xl font-semibold text-rose-500 tabular-nums">{stats?.not_interested ?? '—'}</div>
-            <div className="text-sm text-slate-500">Not Interested</div>
-          </div>
-          <div>
-            <div className="text-2xl font-semibold text-slate-600 tabular-nums">{stats?.unrated ?? '—'}</div>
-            <div className="text-sm text-slate-500">Unrated</div>
-          </div>
-        </div>
+      <Card className="border-slate-200 dark:border-slate-700">
+        <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+            <div className="flex gap-8">
+              <div>
+                <div className="text-2xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                  {stats?.interested ?? '—'}
+                </div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">Interested</div>
+              </div>
+              <div>
+                <div className="text-2xl font-semibold tabular-nums text-rose-500 dark:text-rose-400">
+                  {stats?.not_interested ?? '—'}
+                </div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">Not Interested</div>
+              </div>
+              <div>
+                <div className="text-2xl font-semibold tabular-nums text-slate-600 dark:text-slate-400">
+                  {stats?.unrated ?? '—'}
+                </div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">Unrated</div>
+              </div>
+            </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleResetRatings}
-            className="text-xs text-slate-400 hover:text-amber-600 transition-colors"
-            title="Clear all ratings and taste profile (for testing)"
-          >
-            Reset for testing
-          </button>
-          <button
-            onClick={handleComputeTaste}
-            disabled={computing || !hasEnoughRatings}
-            title={
-              !hasEnoughRatings
-                ? `Mark at least 3 jobs as Interested first (${interested}/3)`
-                : 'Rebuild your taste profile from current ratings'
-            }
-            className="px-5 py-2.5 rounded-lg text-sm font-medium transition-colors
-              bg-violet-600 text-white hover:bg-violet-700
-              disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
-          >
-            {computing && <Spinner size="sm" variant="light" />}
-            {computing ? 'Updating…' : 'Update Taste Profile'}
-          </button>
-        </div>
-        {!hasEnoughRatings && (
-          <p className="text-xs text-slate-400 w-full sm:w-auto">
-            {3 - interested} more Interested {3 - interested === 1 ? 'job' : 'jobs'} needed
-          </p>
-        )}
-      </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleResetRatings}
+                className="text-xs font-medium text-slate-400 transition-colors hover:text-amber-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 rounded-lg dark:text-slate-500 dark:hover:text-amber-500"
+                title="Clear all ratings and taste profile (for testing)"
+              >
+                Reset for testing
+              </button>
+              <Button
+                onClick={handleComputeTaste}
+                disabled={computing || !hasEnoughRatings}
+                title={
+                  !hasEnoughRatings
+                    ? `Mark at least 3 jobs as Interested first (${interested}/3)`
+                    : 'Rebuild your taste profile from current ratings'
+                }
+                className="bg-violet-600 hover:bg-violet-700"
+              >
+                {computing && <Spinner size="sm" variant="light" />}
+                {computing ? 'Updating…' : 'Update Taste Profile'}
+              </Button>
+            </div>
+            {!hasEnoughRatings && (
+              <p className="text-xs text-slate-400 w-full sm:w-auto">
+                {3 - interested} more Interested {3 - interested === 1 ? 'job' : 'jobs'} needed
+              </p>
+            )}
+          </div>
+      </Card>
 
-      {/* Hint */}
-      <p className="text-sm text-slate-600">
+      <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-400">
         Top unrated resume matches are shown below (25 at a time). Rate each one to train your taste profile.
         Once you have enough ratings, click <strong>Update Taste Profile</strong> then use the <strong>Taste</strong> tab
         for personalised recommendations.
       </p>
 
-      {/* Filters */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-wrap items-end gap-6">
-        <div className="flex-1 min-w-[200px]">
-          <label className="block text-sm font-medium text-slate-700 mb-1">
-            Min Match: <span className="text-indigo-600 font-semibold">{filters.minSimilarity}%</span>
-          </label>
-          <input
-            type="range"
-            min={0}
-            max={80}
-            step={5}
-            value={filters.minSimilarity}
-            onChange={(e) => setFilters({ ...filters, minSimilarity: parseInt(e.target.value) })}
-            className="w-full accent-indigo-600"
-          />
-        </div>
-        <div className="w-32">
-          <label className="block text-sm font-medium text-slate-700 mb-1">Max Days Old</label>
-          <input
-            type="number"
-            placeholder="No limit"
-            min={1}
-            value={filters.maxDaysOld ?? ''}
-            onChange={(e) => {
-              const val = e.target.value
-              const parsed = val ? parseInt(val, 10) : null
-              setFilters({
-                ...filters,
-                maxDaysOld: parsed != null && !Number.isNaN(parsed) && parsed > 0 ? parsed : null,
-              })
-            }}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm
-              focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-          />
-        </div>
-      </div>
+      <Card className="border-slate-200 dark:border-slate-700">
+        <CardBody className="p-6">
+          <div className="flex flex-col gap-6 sm:flex-row sm:flex-wrap sm:items-end">
+            <div className="flex-1 min-w-[200px]">
+              <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
+                Min Match: <span className="font-semibold text-indigo-600 dark:text-indigo-400">{localFilters.minSimilarity}%</span>
+              </label>
+              <input
+                type="range"
+                min={0}
+                max={80}
+                step={5}
+                value={localFilters.minSimilarity}
+                onChange={(e) => setLocalFilters({ ...localFilters, minSimilarity: parseInt(e.target.value) })}
+                className="w-full accent-indigo-600"
+              />
+            </div>
+            <div className="w-32">
+              <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
+                Max Days Old
+              </label>
+              <input
+                type="number"
+                placeholder="No limit"
+                min={1}
+                value={localFilters.maxDaysOld ?? ''}
+                onChange={(e) => {
+                  const val = e.target.value
+                  const parsed = val ? parseInt(val, 10) : null
+                  setLocalFilters({
+                    ...localFilters,
+                    maxDaysOld: parsed != null && !Number.isNaN(parsed) && parsed > 0 ? parsed : null,
+                  })
+                }}
+                className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+              />
+            </div>
+          </div>
+        </CardBody>
+      </Card>
 
-      {/* Job list */}
       {loading && jobs.length === 0 ? (
         <>
-          <div className="flex flex-col items-center justify-center py-24 gap-5 bg-white rounded-xl border border-slate-200 shadow-sm">
-            <Spinner size="lg" />
-            <p className="text-slate-600 font-medium">Finding your best matches…</p>
-            <p className="text-sm text-slate-400">This may take a few seconds</p>
-          </div>
+          <LoadingState variant="matches" count={5} />
           {!hasSeenTutorial && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-              <div className="bg-white rounded-xl border border-slate-200 shadow-lg max-w-md p-6">
-                <h3 className="text-lg font-semibold text-slate-900 mb-2">First time here?</h3>
-                <p className="text-slate-600 text-sm mb-6">
+              <div className="max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-lg dark:border-slate-700 dark:bg-slate-800">
+                <h3 className="mb-2 text-lg font-semibold text-slate-900 dark:text-slate-100">
+                  First time here?
+                </h3>
+                <p className="mb-6 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
                   Matching takes a few seconds because we scan thousands of jobs to find your best matches. This is
                   normal — you&apos;ll only wait once. Subsequent loads and filter changes are much faster.
                 </p>
-                <button
-                  onClick={dismissTutorial}
-                  className="w-full px-5 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors"
-                >
+                <Button onClick={dismissTutorial} className="w-full">
                   Got it
-                </button>
+                </Button>
               </div>
             </div>
           )}
         </>
       ) : !loading && jobs.length === 0 ? (
-        <div className="text-center py-20 bg-white rounded-xl border border-slate-200 shadow-sm">
-          <div className="text-4xl mb-4">🎉</div>
-          <p className="text-slate-900 font-semibold text-lg">All current matches have been rated!</p>
-          <p className="text-slate-500 text-sm mt-2">
-            Run <code className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">mcf crawl-incremental</code> to pull new jobs,
-            or lower your filters above.
-          </p>
-          <button
-            onClick={() => {
-              sessionRef.current = { sessionId: null, sessionOffset: 0 }
-              setSessionId(null)
-              setSessionOffset(0)
-              loadJobs(false)
-            }}
-            className="mt-6 px-5 py-2.5 text-sm font-medium rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
-          >
-            Refresh
-          </button>
-        </div>
+        <Card className="border-slate-200 dark:border-slate-700">
+          <CardBody>
+            <EmptyState
+              icon={Sparkles}
+              message="All current matches have been rated!"
+              description="Run mcf crawl-incremental to pull new jobs, or lower your filters above."
+              action={
+                <Button variant="outline" onClick={handleRefresh}>
+                  <RefreshCw className="size-4" />
+                  Refresh
+                </Button>
+              }
+            />
+          </CardBody>
+        </Card>
       ) : (
         <div className="relative">
           {loading && jobs.length > 0 && (
-            <div className="absolute inset-0 z-10 flex items-start justify-center pt-8 bg-white/70 rounded-xl">
-              <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg border border-slate-200 shadow-sm">
+            <div className="absolute inset-0 z-10 flex justify-center pt-8 bg-white/70 rounded-xl dark:bg-slate-900/70">
+              <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-800">
                 <Spinner size="sm" />
-                <span className="text-sm text-slate-600">Updating matches…</span>
+                <span className="text-sm text-slate-600 dark:text-slate-400">Updating matches…</span>
               </div>
             </div>
           )}
           <div className="space-y-4">
-            <p className="text-sm text-slate-500">
-              Showing <strong className="text-slate-700">{jobs.length}</strong> unrated {jobs.length === 1 ? 'job' : 'jobs'}
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Showing <strong className="text-slate-700 dark:text-slate-300">{jobs.length}</strong> unrated {jobs.length === 1 ? 'job' : 'jobs'}
             </p>
             {jobs.map((job) => (
-              <MatchCard
+              <div
                 key={job.job_uuid}
-                match={job}
-                mode="resume"
-                onInteraction={(uuid, type) => rate(uuid, type as 'interested' | 'not_interested')}
-                loading={ratingUuids.has(job.job_uuid)}
-              />
+                className="transition-shadow hover:shadow-md"
+              >
+                <MatchCard
+                  match={job}
+                  mode="resume"
+                  onInteraction={rate}
+                  loading={ratingUuids.has(job.job_uuid)}
+                />
+              </div>
             ))}
 
-            <div className="flex flex-wrap justify-center gap-3 pt-4">
-              <button
-                onClick={() => loadJobs(true)}
+            <div className="flex flex-wrap justify-center gap-4 pt-4">
+              <Button
+                onClick={handleLoadMore}
                 disabled={loadingMore || !hasMore}
-                className="px-6 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-medium
-                  hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed
-                  flex items-center gap-2"
                 title={!hasMore ? 'No more matches available' : 'Load next 25 jobs'}
               >
                 {loadingMore && <Spinner size="sm" variant="light" />}
                 {loadingMore ? 'Loading…' : hasMore ? 'Load more' : 'No more matches'}
-              </button>
-              <button
-                onClick={() => {
-                  sessionRef.current = { sessionId: null, sessionOffset: 0 }
-                  setSessionId(null)
-                  setSessionOffset(0)
-                  loadJobs(false)
-                }}
-                className="px-6 py-2.5 rounded-lg bg-slate-100 text-slate-700 text-sm font-medium
-                  hover:bg-slate-200 transition-colors"
-              >
+              </Button>
+              <Button variant="outline" onClick={handleRefresh}>
+                <RefreshCw className="size-4" />
                 Refresh
-              </button>
+              </Button>
             </div>
           </div>
         </div>

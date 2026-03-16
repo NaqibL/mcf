@@ -1,5 +1,6 @@
 'use client'
 
+import * as React from 'react'
 import { Building2, MapPin, ExternalLink } from 'lucide-react'
 import type { Match } from '@/lib/types'
 
@@ -50,18 +51,19 @@ function ScoreBadge({ score }: { score: number }) {
   )
 }
 
-export function MatchCard({ match, onInteraction, loading, mode }: MatchCardProps) {
+export const MatchCard = React.memo(function MatchCard({ match, onInteraction, loading, mode }: MatchCardProps) {
   const daysAgo = getDaysAgo(match.last_seen_at)
 
   return (
     <div
-      className={`bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all
+      className={`rounded-xl border shadow-sm overflow-hidden transition-all
+        bg-white border-slate-200 dark:bg-slate-800 dark:border-slate-700
         ${loading ? 'opacity-40 pointer-events-none' : 'hover:shadow-md'}
         ${
           match.similarity_score >= 0.75
-            ? 'ring-1 ring-emerald-200/50'
+            ? 'ring-1 ring-emerald-200/50 dark:ring-emerald-800/50'
             : match.similarity_score >= 0.55
-              ? 'ring-1 ring-amber-200/50'
+              ? 'ring-1 ring-amber-200/50 dark:ring-amber-800/50'
               : ''
         }`}
     >
@@ -73,15 +75,15 @@ export function MatchCard({ match, onInteraction, loading, mode }: MatchCardProp
                 href={match.job_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xl font-semibold text-slate-900 hover:text-indigo-600 transition-colors line-clamp-2"
+                className="text-xl font-semibold text-slate-900 hover:text-indigo-600 transition-colors line-clamp-2 dark:text-slate-100 dark:hover:text-indigo-400"
               >
                 {match.title}
               </a>
             ) : (
-              <h3 className="text-xl font-semibold text-slate-900 line-clamp-2">{match.title}</h3>
+              <h3 className="text-xl font-semibold text-slate-900 line-clamp-2 dark:text-slate-100">{match.title}</h3>
             )}
 
-            <div className="flex flex-wrap items-center gap-2 mt-2 text-slate-500 text-sm">
+            <div className="flex flex-wrap items-center gap-2 mt-2 text-slate-500 text-sm dark:text-slate-400">
               {match.company_name && (
                 <span className="flex items-center gap-1.5">
                   <Building2 size={14} className="shrink-0" />
@@ -146,7 +148,7 @@ export function MatchCard({ match, onInteraction, loading, mode }: MatchCardProp
             href={match.job_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-700"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-700 transition-colors dark:text-indigo-400 dark:hover:text-indigo-300"
           >
             View job posting
             <ExternalLink size={14} />
@@ -154,11 +156,11 @@ export function MatchCard({ match, onInteraction, loading, mode }: MatchCardProp
         )}
       </div>
 
-      <div className="border-t border-slate-100 flex">
+      <div className="border-t border-slate-100 flex dark:border-slate-700">
         <button
           onClick={() => onInteraction(match.job_uuid, 'not_interested')}
-          className="flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium
-            bg-slate-100 text-slate-700 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+          className="flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors
+            bg-slate-100 text-slate-700 hover:bg-rose-50 hover:text-rose-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-rose-900/30 dark:hover:text-rose-400"
         >
           <span className="text-base leading-none">✕</span>
           Not Interested
@@ -174,4 +176,4 @@ export function MatchCard({ match, onInteraction, loading, mode }: MatchCardProp
       </div>
     </div>
   )
-}
+})
