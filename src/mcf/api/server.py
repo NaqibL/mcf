@@ -18,7 +18,7 @@ from mcf.api.config import settings
 from mcf.api.services.matching_service import MatchingService
 from mcf.lib.embeddings.base import EmbedderProtocol
 from mcf.lib.embeddings.embedder import Embedder, EmbedderConfig
-from mcf.lib.embeddings.resume import extract_resume_text
+from mcf.lib.embeddings.resume import extract_resume_text, preprocess_resume_text
 from mcf.lib.storage.base import Storage
 
 
@@ -170,6 +170,15 @@ def get_dashboard_active_jobs_over_time(
     user_id: str = Depends(get_current_user),
 ):
     """Return total active jobs per day from job_daily_stats."""
+    store = get_store()
+    return store.get_active_jobs_over_time(limit_days=limit_days)
+
+
+@app.get("/api/dashboard/active-jobs-over-time-public")
+def get_dashboard_active_jobs_over_time_public(
+    limit_days: int = Query(default=30, ge=1, le=90),
+):
+    """Public endpoint for active jobs over time (no auth). Used on login screen."""
     store = get_store()
     return store.get_active_jobs_over_time(limit_days=limit_days)
 
@@ -360,7 +369,8 @@ def _process_resume_text(
             store.update_profile(profile_id=profile_id, resume_storage_path=storage_path)
 
     embedder: EmbedderProtocol = Embedder(EmbedderConfig())
-    embedding = embedder.embed_query(resume_text)
+    preprocessed = preprocess_resume_text(resume_text)
+    embedding = embedder.embed_resume(preprocessed)
     store.upsert_candidate_embedding(
         profile_id=profile_id,
         model_name=embedder.model_name,

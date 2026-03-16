@@ -36,6 +36,7 @@ For AI agents working on this codebase. See [PROJECT_STATUS.md](PROJECT_STATUS.m
 ### Modify matching logic
 1. `matching_service.py` — scoring, filters, session creation
 2. `store.get_active_job_ids_ranked()` — vector pool + ranking (Postgres uses pgvector when available; DuckDB does full scan)
+3. **Skill**: `.cursor/skills/matching-algorithm/` — use when changing fit scores, recency, taste formula, or vector ranking
 
 ### Change crawl behavior
 1. `incremental_crawl.py` — main pipeline

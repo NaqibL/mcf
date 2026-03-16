@@ -165,6 +165,12 @@ export const dashboardApi = {
     })
     return response.data as Array<{ date: string; active_count: number }>
   },
+  getActiveJobsOverTimePublic: async (limitDays = 30) => {
+    const response = await api.get('/api/dashboard/active-jobs-over-time-public', {
+      params: { limit_days: limitDays },
+    })
+    return response.data as Array<{ date: string; active_count: number }>
+  },
   getJobsByCategory: async (limitDays = 90, limit = 30) => {
     const response = await api.get('/api/dashboard/jobs-by-category', {
       params: { limit_days: limitDays, limit },

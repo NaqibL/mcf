@@ -3,19 +3,13 @@
 @tailwind utilities;
 
 :root {
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 214, 219, 220;
-  --background-end-rgb: 255, 255, 255;
+  --foreground-rgb: 15, 23, 42;
+  --background-rgb: 248, 250, 252;
 }
 
 body {
   color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-      to bottom,
-      transparent,
-      rgb(var(--background-end-rgb))
-    )
-    rgb(var(--background-start-rgb));
+  background-color: rgb(var(--background-rgb));
 }
 
 /* Ensure inputs always have visible text (light bg, dark text) regardless of dark mode */
@@ -23,10 +17,10 @@ input:not([type="hidden"]):not([type="file"]),
 textarea,
 select {
   background-color: white !important;
-  color: rgb(17, 24, 39) !important;
+  color: rgb(15, 23, 42) !important;
 }
 
 input::placeholder,
 textarea::placeholder {
-  color: rgb(156, 163, 175) !important;
+  color: rgb(148, 163, 184) !important;
 }

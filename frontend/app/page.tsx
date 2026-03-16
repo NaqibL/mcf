@@ -1,15 +1,16 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import Link from 'next/link'
 import { profileApi } from '@/lib/api'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import type { Profile } from '@/lib/types'
 import AuthGate from './components/AuthGate'
+import Nav from './components/Nav'
 import ResumeTab from './components/ResumeTab'
 import TasteTab from './components/TasteTab'
 import Spinner from './components/Spinner'
 import toast, { Toaster } from 'react-hot-toast'
+import { Upload, RefreshCw } from 'lucide-react'
 
 type Tab = 'resume' | 'taste'
 
@@ -25,8 +26,6 @@ function App() {
       .get()
       .then(async (data) => {
         setProfile(data)
-        // Auto-process the resume if the file exists server-side but no profile
-        // has been created yet (e.g. first run, or after clearing the database).
         if (data.resume_exists && !data.profile) {
           setProcessingResume(true)
           try {
@@ -64,7 +63,6 @@ function App() {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    // Reset so the same file can be re-uploaded
     e.target.value = ''
 
     setProcessingResume(true)
@@ -81,12 +79,12 @@ function App() {
           ? 'Session expired. Please sign in again.'
           : status === 403
             ? 'Access denied. Check your login.'
-          : status === 500
-            ? (detail || 'Server error. Check Railway logs for details.')
-            : detail ||
-              (err.message?.includes('Network') || !err.response
-                ? 'Network error. In Vercel, set NEXT_PUBLIC_API_URL to your Railway URL and redeploy.'
-                : 'Upload failed. Try again.')
+            : status === 500
+              ? (detail || 'Server error. Check Railway logs for details.')
+              : detail ||
+                (err.message?.includes('Network') || !err.response
+                  ? 'Network error. In Vercel, set NEXT_PUBLIC_API_URL to your Railway URL and redeploy.'
+                  : 'Upload failed. Try again.')
       toast.error(msg)
       console.error('[Upload error]', {
         status,
@@ -106,21 +104,74 @@ function App() {
     }
   }
 
+  const navRightSlot = (
+    <div className="flex items-center gap-3">
+      {!loadingProfile && (
+        <>
+          {profile?.profile ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 font-medium">
+                Resume ready
+              </span>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={processingResume}
+                title="Upload a new resume (PDF or DOCX)"
+                className="text-xs text-slate-400 hover:text-white transition-colors flex items-center gap-1"
+              >
+                <Upload size={14} />
+                Replace
+              </button>
+              <button
+                onClick={handleProcessResume}
+                disabled={processingResume}
+                title="Re-process the server-side resume file"
+                className="text-xs text-slate-400 hover:text-white transition-colors flex items-center gap-1"
+              >
+                <RefreshCw size={14} />
+                Re-process
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={processingResume}
+              className="text-xs px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium
+                hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors
+                flex items-center gap-2"
+            >
+              <Upload size={14} />
+              {processingResume ? 'Processing…' : 'Upload Resume'}
+            </button>
+          )}
+
+          {isSupabaseConfigured && (
+            <button
+              onClick={handleSignOut}
+              className="text-xs text-slate-400 hover:text-white transition-colors"
+              title="Sign out"
+            >
+              Sign out
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  )
+
   return (
-    <div className="min-h-screen bg-gray-50 relative">
+    <div className="min-h-screen bg-slate-50 relative">
       <Toaster position="top-right" />
 
-      {/* Loading overlay for resume processing (upload or re-process) */}
       {processingResume && (
         <div className="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="flex flex-col items-center gap-4">
             <Spinner size="lg" />
-            <p className="text-gray-600 font-medium">Processing resume…</p>
+            <p className="text-slate-600 font-medium">Processing resume…</p>
           </div>
         </div>
       )}
 
-      {/* Hidden file input */}
       <input
         ref={fileInputRef}
         type="file"
@@ -129,108 +180,37 @@ function App() {
         onChange={handleFileUpload}
       />
 
-      {/* Top bar */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 flex items-center justify-between h-14">
-          <div className="flex items-center gap-4">
-            <h1 className="text-xl font-bold text-gray-900 tracking-tight">Job Matcher</h1>
-            <Link
-              href="/how-it-works"
-              className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
-            >
-              How it works
-            </Link>
-            <Link
-              href="/dashboard"
-              className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
-            >
-              Dashboard
-            </Link>
+      <Nav rightSlot={navRightSlot} />
+
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
+        {/* Resume status card */}
+        {!loadingProfile && profile && !profile.resume_exists && !profile.profile && (
+          <div className="mb-6 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 text-sm text-amber-800">
+            No resume found. Click <strong>Upload Resume</strong> in the nav to get started.
           </div>
-
-          {/* Resume status + upload */}
-          {!loadingProfile && (
-            <div className="flex items-center gap-2">
-              {profile?.profile ? (
-                <>
-                  <span className="text-xs px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 font-medium">
-                    Resume ready
-                  </span>
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={processingResume}
-                    title="Upload a new resume (PDF or DOCX)"
-                    className="text-xs text-gray-400 hover:text-gray-700 transition-colors px-2"
-                  >
-                    {processingResume ? 'Processing…' : '↑ Replace'}
-                  </button>
-                  <button
-                    onClick={handleProcessResume}
-                    disabled={processingResume}
-                    className="text-xs text-gray-400 hover:text-gray-700 transition-colors"
-                    title="Re-process the server-side resume file"
-                  >
-                    ↺ Re-process
-                  </button>
-                </>
-              ) : (
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={processingResume}
-                  className="text-xs px-3 py-1.5 rounded-full bg-blue-600 text-white font-medium
-                    hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {processingResume ? 'Processing…' : '↑ Upload Resume'}
-                </button>
-              )}
-
-              {isSupabaseConfigured && (
-                <button
-                  onClick={handleSignOut}
-                  className="text-xs text-gray-400 hover:text-gray-700 transition-colors ml-1"
-                  title="Sign out"
-                >
-                  Sign out
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+        )}
 
         {/* Tab bar */}
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 flex gap-1 pb-0">
-          {([
-            { id: 'resume', label: 'Resume', description: 'Rate resume-matched jobs to build your taste' },
-            { id: 'taste', label: 'Taste', description: 'Find jobs matching your taste profile' },
-          ] as const).map(({ id, label, description }) => (
+        <div className="flex gap-1 p-1 bg-slate-200/60 rounded-lg w-fit mb-8">
+          {[
+            { id: 'resume' as const, label: 'Resume Matches', accent: 'indigo' },
+            { id: 'taste' as const, label: 'Taste Matches', accent: 'violet' },
+          ].map(({ id, label, accent }) => (
             <button
               key={id}
               onClick={() => setTab(id)}
-              title={description}
-              className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors
+              className={`px-5 py-2.5 text-sm font-medium rounded-md transition-colors
                 ${tab === id
-                  ? id === 'resume'
-                    ? 'border-blue-600 text-blue-700'
-                    : 'border-purple-600 text-purple-700'
-                  : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+                  ? accent === 'indigo'
+                    ? 'bg-white text-indigo-600 shadow-sm'
+                    : 'bg-white text-violet-600 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'}`}
             >
               {label}
             </button>
           ))}
         </div>
-      </header>
 
-      {/* No-resume warning — only shown when no resume at all */}
-      {!loadingProfile && profile && !profile.resume_exists && !profile.profile && (
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 mt-4">
-          <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 text-sm text-amber-800">
-            No resume found. Click <strong>↑ Upload Resume</strong> to get started.
-          </div>
-        </div>
-      )}
-
-      {/* Main content */}
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6">
         {tab === 'resume' && <ResumeTab />}
         {tab === 'taste' && <TasteTab />}
       </main>

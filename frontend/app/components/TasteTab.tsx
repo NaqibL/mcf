@@ -103,14 +103,14 @@ export default function TasteTab() {
   return (
     <div className="space-y-6">
       {/* Controls */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
-        <p className="text-xs text-purple-700 bg-purple-50 rounded-lg px-3 py-2">
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-5">
+        <p className="text-sm text-violet-700 bg-violet-50 rounded-lg px-4 py-3">
           Jobs ranked by your <strong>Taste Profile</strong> — built from your ratings in the Resume tab.
-          The more you rate, the better this gets. Go to Resume to add more ratings, then click{' '}
+          The more you rate, the better this gets. Add more ratings in Resume, then click{' '}
           <strong>Update Taste Profile</strong>.
         </p>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-4">
           <button
             onClick={handleComputeTaste}
             disabled={computing || !hasEnoughRatings}
@@ -119,25 +119,25 @@ export default function TasteTab() {
                 ? `Mark at least 3 jobs as Interested in Resume tab first (${interested}/3)`
                 : 'Rebuild your taste profile from current ratings'
             }
-            className="px-5 py-2 rounded-lg text-sm font-medium transition-colors
-              bg-purple-600 text-white hover:bg-purple-700
+            className="px-5 py-2.5 rounded-lg text-sm font-medium transition-colors
+              bg-violet-600 text-white hover:bg-violet-700
               disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
           >
             {computing && <Spinner size="sm" variant="light" />}
             {computing ? 'Updating…' : 'Update Taste Profile'}
           </button>
           {!hasEnoughRatings && (
-            <span className="text-xs text-gray-400">
+            <span className="text-sm text-slate-500">
               {3 - interested} more Interested {3 - interested === 1 ? 'job' : 'jobs'} needed (rate in Resume tab)
             </span>
           )}
         </div>
 
         {/* Filters */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-gray-100">
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Min Match: <span className="text-purple-600 font-bold">{filters.minSimilarity}%</span>
+        <div className="flex flex-wrap items-end gap-6 pt-4 border-t border-slate-100">
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Min Match: <span className="text-violet-600 font-semibold">{filters.minSimilarity}%</span>
             </label>
             <input
               type="range"
@@ -146,11 +146,25 @@ export default function TasteTab() {
               step={5}
               value={filters.minSimilarity}
               onChange={(e) => setFilters({ ...filters, minSimilarity: parseInt(e.target.value) })}
-              className="w-full accent-purple-600"
+              className="w-full accent-violet-600"
             />
           </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Max Days Old</label>
+          <div className="w-24">
+            <label className="block text-sm font-medium text-slate-700 mb-1">Results</label>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={filters.topK}
+              onChange={(e) =>
+                setFilters({ ...filters, topK: parseInt(e.target.value) || 25 })
+              }
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm
+                focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+            />
+          </div>
+          <div className="w-32">
+            <label className="block text-sm font-medium text-slate-700 mb-1">Max Days Old</label>
             <input
               type="number"
               placeholder="No limit"
@@ -164,22 +178,8 @@ export default function TasteTab() {
                   maxDaysOld: parsed != null && !Number.isNaN(parsed) && parsed > 0 ? parsed : null,
                 })
               }}
-              className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm
-                focus:outline-none focus:ring-2 focus:ring-purple-400"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Results</label>
-            <input
-              type="number"
-              min={1}
-              max={100}
-              value={filters.topK}
-              onChange={(e) =>
-                setFilters({ ...filters, topK: parseInt(e.target.value) || 25 })
-              }
-              className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm
-                focus:outline-none focus:ring-2 focus:ring-purple-400"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm
+                focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
             />
           </div>
         </div>
@@ -187,8 +187,8 @@ export default function TasteTab() {
         <button
           onClick={findMatches}
           disabled={finding || !hasEnoughRatings}
-          className="w-full py-2.5 rounded-lg text-white font-medium text-sm transition-colors
-            bg-purple-600 hover:bg-purple-700
+          className="w-full py-3 rounded-lg text-white font-medium text-sm transition-colors
+            bg-violet-600 hover:bg-violet-700
             disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {finding ? (
@@ -205,9 +205,9 @@ export default function TasteTab() {
       {/* Results */}
       {matches.length > 0 ? (
         <div className="space-y-4">
-          <div className="text-sm text-gray-500">
-            Showing <strong>{matches.length}</strong> matches via <strong>Taste Profile</strong>
-          </div>
+          <p className="text-sm text-slate-500">
+            Showing <strong className="text-slate-700">{matches.length}</strong> matches via <strong>Taste Profile</strong>
+          </p>
           {matches.map((m) => (
             <MatchCard
               key={m.job_uuid}
@@ -219,21 +219,31 @@ export default function TasteTab() {
           ))}
         </div>
       ) : finding ? (
-        <div className="flex flex-col items-center justify-center py-20 gap-4 bg-white rounded-xl border border-gray-200">
+        <div className="flex flex-col items-center justify-center py-24 gap-5 bg-white rounded-xl border border-slate-200 shadow-sm">
           <Spinner size="lg" />
-          <p className="text-gray-500 font-medium">Finding taste matches…</p>
+          <p className="text-slate-600 font-medium">Finding taste matches…</p>
+          <p className="text-sm text-slate-400">This may take a few seconds</p>
         </div>
       ) : (
-        <div className="text-center py-16 bg-white rounded-xl border border-gray-200">
-          <div className="text-4xl mb-3">🔍</div>
-          <p className="text-gray-500">
-            Click <strong>Find Taste Matches</strong> above to search for jobs that match your taste.
+        <div className="text-center py-20 bg-white rounded-xl border border-slate-200 shadow-sm">
+          <div className="text-4xl mb-4">🔍</div>
+          <p className="text-slate-900 font-semibold text-lg">Find jobs that match your taste</p>
+          <p className="text-slate-500 text-sm mt-2">
+            Click <strong>Find Taste Matches</strong> above to search for jobs ranked by your preferences.
           </p>
           {!hasEnoughRatings && (
-            <p className="text-sm text-gray-400 mt-2">
+            <p className="text-sm text-slate-400 mt-3">
               Rate at least 3 jobs as Interested in the Resume tab first, then Update Taste Profile.
             </p>
           )}
+          <button
+            onClick={findMatches}
+            disabled={!hasEnoughRatings}
+            className="mt-6 px-8 py-3 rounded-lg text-white font-medium bg-violet-600 hover:bg-violet-700
+              disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            Find Taste Matches
+          </button>
         </div>
       )}
     </div>

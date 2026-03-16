@@ -2,7 +2,11 @@
 
 import { useEffect, useState, useRef } from 'react'
 import type { Session } from '@supabase/supabase-js'
+import Link from 'next/link'
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
+import { dashboardApi } from '@/lib/api'
+import Nav from './Nav'
 import Spinner from './Spinner'
 
 interface Props {
@@ -23,6 +27,7 @@ export default function AuthGate({ children }: Props) {
   const [isSignUp, setIsSignUp] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [activeJobsOverTime, setActiveJobsOverTime] = useState<Array<{ date: string; active_count: number }>>([])
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -39,12 +44,17 @@ export default function AuthGate({ children }: Props) {
     return () => listener.subscription.unsubscribe()
   }, [])
 
+  useEffect(() => {
+    if (!isSupabaseConfigured || session) return
+    dashboardApi.getActiveJobsOverTimePublic(30).then(setActiveJobsOverTime).catch(() => {})
+  }, [session])
+
   // Still loading
   if (session === undefined) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-gray-50">
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-slate-50">
         <Spinner size="lg" />
-        <p className="text-gray-500 text-sm">Loading…</p>
+        <p className="text-slate-500 text-sm">Loading…</p>
       </div>
     )
   }
@@ -68,106 +78,155 @@ export default function AuthGate({ children }: Props) {
     }
   }
 
+  const formatDate = (d: string) => {
+    const date = new Date(d)
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-      <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Job Matcher</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {isSignUp ? 'Create an account to get started.' : 'Sign in to access your job matches.'}
-          </p>
-          <a
-            href="/how-it-works"
-            className="text-xs text-blue-600 hover:underline mt-2 inline-block"
-          >
-            How does it work? →
-          </a>
-        </div>
+    <div className="min-h-screen bg-slate-50">
+      <Nav variant="auth" />
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-              Email
-            </label>
-            <input
-              ref={inputRef}
-              id="email"
-              type="email"
-              autoComplete="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm
-                focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
+      <main className="flex flex-col lg:flex-row items-center justify-center gap-8 lg:gap-12 px-4 py-16 max-w-5xl mx-auto">
+        <div className="w-full max-w-md bg-white rounded-xl border border-slate-200 shadow-sm p-8 shrink-0">
+          <div className="mb-8">
+            <h1 className="text-2xl font-semibold text-slate-900">Sign in</h1>
+            <p className="text-slate-600 mt-1 text-sm">
+              {isSignUp
+                ? 'Create an account to get started.'
+                : 'Sign in to access your job matches.'}
+            </p>
+            <Link
+              href="/how-it-works"
+              className="text-sm text-indigo-600 hover:text-indigo-700 mt-3 inline-block font-medium"
+            >
+              How does it work? →
+            </Link>
           </div>
 
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              autoComplete={isSignUp ? 'new-password' : 'current-password'}
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm
-                focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-1.5">
+                Email
+              </label>
+              <input
+                ref={inputRef}
+                id="email"
+                type="email"
+                autoComplete="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm
+                  focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
 
-          {error && (
-            <p className="text-xs text-red-600">{error}</p>
-          )}
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1.5">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm
+                  focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium
-              hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors
-              flex items-center justify-center gap-2"
-          >
-            {loading ? (
+            {error && (
+              <p className="text-sm text-rose-600 bg-rose-50 px-4 py-2 rounded-lg">{error}</p>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-3 rounded-lg bg-indigo-600 text-white text-sm font-medium
+                hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors
+                flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <Spinner size="sm" variant="light" />
+                  Please wait…
+                </>
+              ) : (
+                isSignUp ? 'Sign up' : 'Sign in'
+              )}
+            </button>
+          </form>
+
+          <p className="text-sm text-slate-500 text-center mt-6">
+            {isSignUp ? (
               <>
-                <Spinner size="sm" variant="light" />
-                Please wait…
+                Already have an account?{' '}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSignUp(false)
+                    setError('')
+                  }}
+                  className="text-indigo-600 hover:text-indigo-700 font-medium"
+                >
+                  Sign in
+                </button>
               </>
             ) : (
-              isSignUp ? 'Sign up' : 'Sign in'
+              <>
+                Don&apos;t have an account?{' '}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSignUp(true)
+                    setError('')
+                  }}
+                  className="text-indigo-600 hover:text-indigo-700 font-medium"
+                >
+                  Sign up
+                </button>
+              </>
             )}
-          </button>
-        </form>
+          </p>
+        </div>
 
-        <p className="text-xs text-gray-400 text-center">
-          {isSignUp ? (
-            <>
-              Already have an account?{' '}
-              <button
-                type="button"
-                onClick={() => { setIsSignUp(false); setError('') }}
-                className="text-blue-600 hover:underline"
-              >
-                Sign in
-              </button>
-            </>
-          ) : (
-            <>
-              Don&apos;t have an account?{' '}
-              <button
-                type="button"
-                onClick={() => { setIsSignUp(true); setError('') }}
-                className="text-blue-600 hover:underline"
-              >
-                Sign up
-              </button>
-            </>
-          )}
-        </p>
-      </div>
+        {activeJobsOverTime.length > 0 && (
+          <div className="w-full max-w-md lg:max-w-lg bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <h3 className="text-sm font-medium text-slate-700 mb-3">Total active jobs (last 30 days)</h3>
+            <div className="h-[220px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={activeJobsOverTime} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="authActiveJobsGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="date" tickFormatter={formatDate} fontSize={11} />
+                  <YAxis fontSize={11} />
+                  <Tooltip
+                    formatter={(value: number) => [value.toLocaleString(), 'Active jobs']}
+                    labelFormatter={(label) => formatDate(label)}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="active_count"
+                    stroke="#3b82f6"
+                    strokeWidth={2}
+                    fill="url(#authActiveJobsGradient)"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+      </main>
     </div>
   )
 }

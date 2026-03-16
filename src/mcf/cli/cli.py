@@ -19,7 +19,7 @@ from mcf.api.services.matching_service import MatchingService
 from mcf.lib.api.client import MCFAPIError
 from mcf.lib.crawler.crawler import CrawlProgress
 from mcf.lib.embeddings.embedder import Embedder, EmbedderConfig
-from mcf.lib.embeddings.resume import extract_resume_text
+from mcf.lib.embeddings.resume import extract_resume_text, preprocess_resume_text
 from mcf.lib.pipeline.incremental_crawl import run_incremental_crawl
 from mcf.lib.sources.cag_source import CareersGovJobSource
 from mcf.lib.sources.mcf_source import MCFJobSource
@@ -401,7 +401,8 @@ def process_resume(
         # the embedding space aligns correctly with passage (job) embeddings.
         console.print("[cyan]Generating embedding...[/cyan]")
         embedder = Embedder(EmbedderConfig())
-        embedding = embedder.embed_query(resume_text)
+        preprocessed = preprocess_resume_text(resume_text)
+        embedding = embedder.embed_resume(preprocessed)
         store.upsert_candidate_embedding(
             profile_id=profile_id,
             model_name=embedder.model_name,

@@ -30,3 +30,7 @@ class EmbedderProtocol(Protocol):
         should handle that distinction here.
         """
         ...
+
+    def embed_resume(self, text: str, chunk_size: int = 400, overlap: int = 80) -> list[float]:
+        """Embed resume text, chunking if long. Default impl: embed_query(text)."""
+        ...

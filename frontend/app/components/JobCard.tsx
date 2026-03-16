@@ -1,5 +1,6 @@
 'use client'
 
+import { Building2, MapPin, ExternalLink } from 'lucide-react'
 import type { Match } from '@/lib/types'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -13,15 +14,15 @@ export function getDaysAgo(dateStr?: string): number | null {
 function RecencyBadge({ daysAgo }: { daysAgo: number | null }) {
   if (daysAgo === null) return null
   const label =
-    daysAgo === 0 ? 'Last seen today' : daysAgo === 1 ? 'Last seen 1 day ago' : `Last seen ${daysAgo} days ago`
+    daysAgo === 0 ? 'Today' : daysAgo === 1 ? '1 day ago' : `${daysAgo} days ago`
   const cls =
     daysAgo <= 7
       ? 'bg-emerald-100 text-emerald-700'
       : daysAgo <= 30
-      ? 'bg-amber-100 text-amber-700'
-      : 'bg-gray-100 text-gray-600'
+        ? 'bg-amber-100 text-amber-700'
+        : 'bg-slate-100 text-slate-600'
   return (
-    <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${cls}`}>{label}</span>
+    <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${cls}`}>{label}</span>
   )
 }
 
@@ -35,17 +36,16 @@ interface MatchCardProps {
 }
 
 function ScoreBadge({ score }: { score: number }) {
-  const pct = (score * 100).toFixed(1)
+  const pct = (score * 100).toFixed(0)
   const cls =
     score >= 0.75
-      ? 'text-emerald-600'
+      ? 'bg-emerald-500/10 text-emerald-700 border-emerald-200'
       : score >= 0.55
-      ? 'text-amber-600'
-      : 'text-gray-500'
+        ? 'bg-amber-500/10 text-amber-700 border-amber-200'
+        : 'bg-slate-100 text-slate-600 border-slate-200'
   return (
-    <div className="text-right shrink-0">
-      <div className={`text-2xl font-bold tabular-nums ${cls}`}>{pct}%</div>
-      <div className="text-xs text-gray-400 font-medium">match</div>
+    <div className={`shrink-0 px-3 py-1.5 rounded-full border text-sm font-semibold tabular-nums ${cls}`}>
+      {pct}% match
     </div>
   )
 }
@@ -55,114 +55,120 @@ export function MatchCard({ match, onInteraction, loading, mode }: MatchCardProp
 
   return (
     <div
-      className={`bg-white rounded-xl border-2 p-5 transition-all
-        ${loading ? 'opacity-40 pointer-events-none' : 'hover:shadow-lg'}
+      className={`bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all
+        ${loading ? 'opacity-40 pointer-events-none' : 'hover:shadow-md'}
         ${
           match.similarity_score >= 0.75
-            ? 'border-emerald-200'
+            ? 'ring-1 ring-emerald-200/50'
             : match.similarity_score >= 0.55
-            ? 'border-amber-200'
-            : 'border-gray-200'
+              ? 'ring-1 ring-amber-200/50'
+              : ''
         }`}
     >
-      <div className="flex items-start gap-4 mb-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-2 mb-1">
+      <div className="p-5">
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div className="flex-1 min-w-0">
             {match.job_url ? (
               <a
                 href={match.job_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xl font-bold text-gray-900 hover:text-blue-700 hover:underline underline-offset-2"
+                className="text-xl font-semibold text-slate-900 hover:text-indigo-600 transition-colors line-clamp-2"
               >
                 {match.title}
               </a>
             ) : (
-              <h3 className="text-xl font-bold text-gray-900">{match.title}</h3>
-            )}
-            <RecencyBadge daysAgo={daysAgo} />
-          </div>
-          <div className="text-sm text-gray-600 space-y-0.5 mb-2">
-            {match.company_name && (
-              <div className="font-medium text-gray-800">{match.company_name}</div>
-            )}
-            {match.location && <div>{match.location}</div>}
-          </div>
-
-          {/* Score breakdown (resume mode) */}
-          {mode === 'resume' &&
-            match.semantic_score !== undefined &&
-            match.skills_overlap_score !== undefined && (
-              <div className="flex gap-3 text-xs text-gray-500 mb-2">
-                <span>Semantic: {(match.semantic_score * 100).toFixed(1)}%</span>
-                <span>Skills: {(match.skills_overlap_score * 100).toFixed(1)}%</span>
-              </div>
+              <h3 className="text-xl font-semibold text-slate-900 line-clamp-2">{match.title}</h3>
             )}
 
-          {/* Matched skills */}
-          {match.matched_skills && match.matched_skills.length > 0 && (
-            <div className="flex flex-wrap gap-1 mb-2">
-              {match.matched_skills.slice(0, 8).map((s) => (
-                <span
-                  key={s}
-                  className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-xs rounded-full border border-emerald-100"
-                >
-                  {s}
+            <div className="flex flex-wrap items-center gap-2 mt-2 text-slate-500 text-sm">
+              {match.company_name && (
+                <span className="flex items-center gap-1.5">
+                  <Building2 size={14} className="shrink-0" />
+                  {match.company_name}
                 </span>
-              ))}
-              {match.matched_skills.length > 8 && (
-                <span className="text-xs text-gray-400">+{match.matched_skills.length - 8} more</span>
               )}
-            </div>
-          )}
-
-          {/* Taste mode skills */}
-          {mode === 'taste' && match.job_skills && match.job_skills.length > 0 && (
-            <div className="flex flex-wrap gap-1 mb-2">
-              {match.job_skills.slice(0, 6).map((s) => (
-                <span
-                  key={s}
-                  className="px-2 py-0.5 bg-purple-50 text-purple-700 text-xs rounded-full border border-purple-100"
-                >
-                  {s}
+              {match.location && (
+                <span className="flex items-center gap-1.5">
+                  <MapPin size={14} className="shrink-0" />
+                  {match.location}
                 </span>
-              ))}
+              )}
+              <RecencyBadge daysAgo={daysAgo} />
+            </div>
+          </div>
+          <ScoreBadge score={match.similarity_score} />
+        </div>
+
+        {/* Score breakdown (resume mode) */}
+        {mode === 'resume' &&
+          match.semantic_score !== undefined &&
+          match.skills_overlap_score !== undefined && (
+            <div className="flex gap-3 text-xs text-slate-400 mb-3">
+              <span>Semantic: {(match.semantic_score * 100).toFixed(1)}%</span>
+              <span>Skills: {(match.skills_overlap_score * 100).toFixed(1)}%</span>
             </div>
           )}
 
-          {match.job_url && (
-            <a
-              href={match.job_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-lg
-                bg-blue-50 text-blue-700 text-sm font-medium border border-blue-100
-                hover:bg-blue-100 transition-colors"
-            >
-              View job posting ↗
-            </a>
-          )}
-        </div>
-        <ScoreBadge score={match.similarity_score} />
+        {/* Matched skills */}
+        {match.matched_skills && match.matched_skills.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {match.matched_skills.slice(0, 6).map((s) => (
+              <span
+                key={s}
+                className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-xs font-medium rounded-md"
+              >
+                {s}
+              </span>
+            ))}
+            {match.matched_skills.length > 6 && (
+              <span className="text-xs text-slate-400">+{match.matched_skills.length - 6}</span>
+            )}
+          </div>
+        )}
+
+        {/* Taste mode skills */}
+        {mode === 'taste' && match.job_skills && match.job_skills.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {match.job_skills.slice(0, 6).map((s) => (
+              <span
+                key={s}
+                className="px-2 py-0.5 bg-violet-50 text-violet-700 text-xs font-medium rounded-md"
+              >
+                {s}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {match.job_url && (
+          <a
+            href={match.job_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-700"
+          >
+            View job posting
+            <ExternalLink size={14} />
+          </a>
+        )}
       </div>
 
-      <div className="flex gap-3 pt-3 border-t border-gray-100">
+      <div className="border-t border-slate-100 flex">
         <button
           onClick={() => onInteraction(match.job_uuid, 'not_interested')}
-          className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
-            bg-red-50 text-red-600 font-medium text-sm
-            hover:bg-red-100 active:bg-red-200 transition-colors"
+          className="flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium
+            bg-slate-100 text-slate-700 hover:bg-rose-50 hover:text-rose-600 transition-colors"
         >
-          <span className="text-lg leading-none">✕</span>
+          <span className="text-base leading-none">✕</span>
           Not Interested
         </button>
         <button
           onClick={() => onInteraction(match.job_uuid, 'interested')}
-          className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
-            bg-emerald-50 text-emerald-700 font-medium text-sm
-            hover:bg-emerald-100 active:bg-emerald-200 transition-colors"
+          className="flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium
+            bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
         >
-          <span className="text-lg leading-none">✓</span>
+          <span className="text-base leading-none">✓</span>
           Interested
         </button>
       </div>

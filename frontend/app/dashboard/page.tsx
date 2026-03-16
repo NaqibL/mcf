@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import {
   AreaChart,
   Area,
@@ -17,10 +16,15 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts'
+import { Briefcase, CheckCircle, XCircle, Database, AlertCircle, BarChart2 } from 'lucide-react'
 import { dashboardApi } from '@/lib/api'
 import AuthGate from '../components/AuthGate'
+import Nav from '../components/Nav'
+import NavUserActions from '../components/NavUserActions'
 import Spinner from '../components/Spinner'
 import toast from 'react-hot-toast'
+
+const CHART_COLORS = ['#6366f1', '#8b5cf6', '#10b981', '#f59e0b', '#f43f5e', '#0ea5e9', '#64748b', '#a16207']
 
 type Summary = {
   total_jobs: number
@@ -63,8 +67,6 @@ function DashboardContent() {
     salary_buckets: Array<{ bucket: string; count: number }>
   } | null>(null)
   const [categoryDetailLoading, setCategoryDetailLoading] = useState(false)
-
-  const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
 
   useEffect(() => {
     const load = async () => {
@@ -125,6 +127,17 @@ function DashboardContent() {
     return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' })
   }
 
+  // Use 90th percentile for Y axis to avoid backfill spikes dominating the scale
+  const getPostedRemovedDomainMax = () => {
+    if (!jobsPostedAndRemoved.length) return 100
+    const values = jobsPostedAndRemoved.flatMap((d) => [d.posted_count, d.removed_count]).filter((v) => v > 0)
+    if (!values.length) return 100
+    const sorted = [...values].sort((a, b) => a - b)
+    const p90Index = Math.floor(sorted.length * 0.9)
+    const p90 = sorted[p90Index] ?? sorted[sorted.length - 1]
+    return Math.max(100, Math.ceil(p90 * 1.2))
+  }
+
   const employmentData = selectedCategory && categoryStats
     ? categoryStats.employment_types.filter((x) => x.employment_type !== 'Unknown')
     : jobsByEmploymentType
@@ -135,116 +148,127 @@ function DashboardContent() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Spinner size="lg" />
+      <div className="min-h-screen bg-slate-50 flex flex-col">
+        <Nav rightSlot={<NavUserActions />} />
+        <div className="flex-1 flex flex-col items-center justify-center gap-4">
+          <Spinner size="lg" />
+          <p className="text-slate-500 text-sm">Loading dashboard…</p>
+        </div>
       </div>
     )
   }
 
+  const timeRangeOptions = [
+    { value: 30, label: '30d' },
+    { value: 90, label: '90d' },
+    { value: 180, label: '180d' },
+    { value: 365, label: '365d' },
+  ]
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-          <h1 className="text-xl font-bold text-gray-900">Job Analytics Dashboard</h1>
-          <Link
-            href="/"
-            className="text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors"
-          >
-            ← Back to Job Matcher
-          </Link>
-        </div>
-      </header>
+    <div className="min-h-screen bg-slate-50">
+      <Nav rightSlot={null} />
 
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-10">
         {/* Summary cards */}
         <section>
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Summary</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-slate-900">Summary</h2>
+            <div className="flex gap-1 p-1 bg-slate-200/60 rounded-lg">
+              {timeRangeOptions.map(({ value, label }) => (
+                <button
+                  key={value}
+                  onClick={() => setLimitDays(value)}
+                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors
+                    ${limitDays === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-            <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-              <div className="text-2xl font-bold text-gray-900">{summary?.total_jobs?.toLocaleString() ?? '—'}</div>
-              <div className="text-sm text-gray-500">Total jobs</div>
-            </div>
-            <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-              <div className="text-2xl font-bold text-emerald-600">{summary?.active_jobs?.toLocaleString() ?? '—'}</div>
-              <div className="text-sm text-gray-500">Active jobs</div>
-            </div>
-            <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-              <div className="text-2xl font-bold text-gray-500">{summary?.inactive_jobs?.toLocaleString() ?? '—'}</div>
-              <div className="text-sm text-gray-500">Inactive jobs</div>
-            </div>
-            <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-              <div className="text-2xl font-bold text-blue-600">{summary?.jobs_with_embeddings?.toLocaleString() ?? '—'}</div>
-              <div className="text-sm text-gray-500">With embeddings</div>
-            </div>
-            <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-              <div className="text-2xl font-bold text-amber-600">{summary?.jobs_needing_backfill?.toLocaleString() ?? '—'}</div>
-              <div className="text-sm text-gray-500">Need backfill</div>
-              <div className="text-xs text-gray-400 mt-0.5">Category/employment missing</div>
-            </div>
-            <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-              <div className="text-sm font-medium text-gray-700 mb-1">By source (MCF only)</div>
-              <div className="flex flex-wrap gap-2">
-                {summary?.by_source?.mcf != null ? (
-                  <span className="text-xs px-2 py-0.5 bg-gray-100 rounded-full">
-                    mcf: {summary.by_source.mcf.toLocaleString()}
-                  </span>
-                ) : (
-                  '—'
-                )}
+            <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col items-center text-center min-h-[100px] justify-center">
+              <div className="p-2 rounded-lg bg-slate-100 mb-2">
+                <Briefcase size={20} className="text-slate-600" />
               </div>
+              <div className="text-2xl font-bold text-slate-900 tabular-nums">{summary?.total_jobs?.toLocaleString() ?? '—'}</div>
+              <div className="text-sm text-slate-500">Total jobs</div>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col items-center text-center min-h-[100px] justify-center">
+              <div className="p-2 rounded-lg bg-emerald-100 mb-2">
+                <CheckCircle size={20} className="text-emerald-600" />
+              </div>
+              <div className="text-2xl font-bold text-emerald-600 tabular-nums">{summary?.active_jobs?.toLocaleString() ?? '—'}</div>
+              <div className="text-sm text-slate-500">Active jobs</div>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col items-center text-center min-h-[100px] justify-center">
+              <div className="p-2 rounded-lg bg-slate-100 mb-2">
+                <XCircle size={20} className="text-slate-500" />
+              </div>
+              <div className="text-2xl font-bold text-slate-600 tabular-nums">{summary?.inactive_jobs?.toLocaleString() ?? '—'}</div>
+              <div className="text-sm text-slate-500">Inactive jobs</div>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col items-center text-center min-h-[100px] justify-center">
+              <div className="p-2 rounded-lg bg-indigo-100 mb-2">
+                <Database size={20} className="text-indigo-600" />
+              </div>
+              <div className="text-2xl font-bold text-indigo-600 tabular-nums">{summary?.jobs_with_embeddings?.toLocaleString() ?? '—'}</div>
+              <div className="text-sm text-slate-500">With embeddings</div>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col items-center text-center min-h-[100px] justify-center">
+              <div className="p-2 rounded-lg bg-amber-100 mb-2">
+                <AlertCircle size={20} className="text-amber-600" />
+              </div>
+              <div className="text-2xl font-bold text-amber-600 tabular-nums">{summary?.jobs_needing_backfill?.toLocaleString() ?? '—'}</div>
+              <div className="text-sm text-slate-500">Need backfill</div>
+              <div className="text-xs text-slate-400 mt-0.5">Category/employment missing</div>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col items-center text-center min-h-[100px] justify-center">
+              <div className="p-2 rounded-lg bg-slate-100 mb-2">
+                <BarChart2 size={20} className="text-slate-600" />
+              </div>
+              <div className="text-2xl font-bold text-slate-600 tabular-nums">{summary?.by_source?.mcf?.toLocaleString() ?? '—'}</div>
+              <div className="text-sm text-slate-500">By source (MCF)</div>
             </div>
           </div>
         </section>
 
         {/* Jobs by posted date and removed + Total active jobs */}
         <section>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Jobs over time</h2>
-            <select
-              value={limitDays}
-              onChange={(e) => setLimitDays(Number(e.target.value))}
-              className="text-sm border border-gray-300 rounded-lg px-3 py-1.5"
-            >
-              <option value={30}>Last 30 days</option>
-              <option value={90}>Last 90 days</option>
-              <option value={180}>Last 180 days</option>
-              <option value={365}>Last 365 days</option>
-            </select>
-          </div>
-          <div className="grid md:grid-cols-2 gap-6">
-            <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm min-h-[320px]">
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Posted vs removed</h3>
-              <div className="h-[280px] min-h-[200px] w-full">
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">Jobs over time</h2>
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+              <h3 className="text-sm font-medium text-slate-700 mb-2">Posted vs removed</h3>
+              <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={jobsPostedAndRemoved} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <BarChart
+                  data={jobsPostedAndRemoved}
+                  margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+                  barCategoryGap={4}
+                  barGap={2}
+                  barSize={12}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis dataKey="date" tickFormatter={(v) => formatDate(v)} fontSize={11} />
-                  <YAxis
-                    fontSize={11}
-                    domain={[
-                      0,
-                      jobsPostedAndRemoved.length
-                        ? Math.max(100, Math.ceil(Math.max(...jobsPostedAndRemoved.map((d) => d.posted_count)) * 1.15))
-                        : 1000,
-                    ]}
-                  />
+                  <YAxis fontSize={11} domain={[0, getPostedRemovedDomainMax()]} />
                   <Tooltip
                     formatter={(value: number) => [value.toLocaleString(), '']}
                     labelFormatter={(label) => formatDate(label)}
                   />
                   <Legend />
-                  <Bar dataKey="posted_count" name="Posted" fill="#10b981" radius={[0, 0, 0, 0]} />
-                  <Bar dataKey="removed_count" name="Removed" fill="#ef4444" radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="posted_count" name="Posted" fill="#10b981" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="removed_count" name="Removed" fill="#ef4444" radius={[2, 2, 0, 0]} />
                 </BarChart>
                 </ResponsiveContainer>
               </div>
               {jobsPostedAndRemoved.length === 0 && (
-                <p className="text-sm text-gray-500 mt-2">No data for this period.</p>
+                <p className="text-sm text-slate-500 mt-2">No data for this period.</p>
               )}
             </div>
-            <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm min-h-[320px]">
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Total active jobs</h3>
-              <div className="h-[280px] min-h-[200px] w-full">
+            <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+              <h3 className="text-sm font-medium text-slate-700 mb-2">Total active jobs</h3>
+              <div className="h-[340px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={activeJobsOverTime} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                   <defs>
@@ -253,7 +277,7 @@ function DashboardContent() {
                       <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis dataKey="date" tickFormatter={(v) => formatDate(v)} fontSize={11} />
                   <YAxis fontSize={11} />
                   <Tooltip
@@ -271,7 +295,7 @@ function DashboardContent() {
                 </ResponsiveContainer>
               </div>
               {activeJobsOverTime.length === 0 && (
-                <p className="text-sm text-gray-500 mt-2">No data for this period.</p>
+                <p className="text-sm text-slate-500 mt-2">No data for this period.</p>
               )}
             </div>
           </div>
@@ -280,51 +304,53 @@ function DashboardContent() {
         {/* Jobs by category - drill-down */}
         <section>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Jobs by category (MCF industry)</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Jobs by category (MCF industry)</h2>
             {selectedCategory && (
               <button
                 type="button"
                 onClick={() => setSelectedCategory(null)}
-                className="text-sm text-gray-500 hover:text-gray-700"
+                className="text-sm text-slate-500 hover:text-slate-700"
               >
                 Clear selection
               </button>
             )}
           </div>
-          <p className="text-sm text-gray-500 mb-3">Click a category bar or pill to see details and filter other charts.</p>
+          <p className="text-sm text-slate-500 mb-3">Click a category bar or pill to see details and filter other charts.</p>
           <div className="flex flex-wrap gap-2 mb-3">
             {jobsByCategory.slice(0, 12).map((c) => (
               <button
                 key={c.category}
                 type="button"
                 onClick={() => setSelectedCategory((prev) => (prev === c.category ? null : c.category))}
-                className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
                   selectedCategory === c.category
                     ? 'bg-indigo-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
               >
                 {c.category}
               </button>
             ))}
           </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm h-96">
+          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <div className="h-[500px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={jobsByCategory} layout="vertical" margin={{ left: 120, right: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <BarChart data={jobsByCategory} layout="vertical" margin={{ left: 140, right: 24 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis type="number" fontSize={11} />
                 <YAxis
                   type="category"
                   dataKey="category"
-                  width={115}
-                  fontSize={10}
-                  tick={{ fontSize: 9 }}
+                  width={135}
+                  fontSize={11}
+                  tick={{ fontSize: 10 }}
                 />
                 <Tooltip formatter={(value: number) => [value.toLocaleString(), 'Jobs']} />
                 <Bar
                   dataKey="count"
                   name="Jobs"
                   radius={[0, 4, 4, 0]}
+                  barSize={28}
                   cursor="pointer"
                   onClick={(data: unknown) => {
                     const payload = (data as { payload?: { category?: string } })?.payload
@@ -344,11 +370,12 @@ function DashboardContent() {
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+            </div>
           </div>
 
           {selectedCategory && (
-            <div className="mt-6 bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">{selectedCategory}</h3>
+            <div className="mt-6 bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+              <h3 className="text-lg font-semibold text-slate-900 mb-4">{selectedCategory}</h3>
               {categoryDetailLoading ? (
                 <div className="flex items-center justify-center h-48">
                   <Spinner size="md" />
@@ -356,33 +383,33 @@ function DashboardContent() {
               ) : categoryStats ? (
                 <>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-                    <div className="rounded-lg bg-gray-50 p-3">
-                      <div className="text-xl font-bold text-gray-900">{categoryStats.active_count.toLocaleString()}</div>
-                      <div className="text-xs text-gray-500">Active listings</div>
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <div className="text-xl font-bold text-slate-900 tabular-nums">{categoryStats.active_count.toLocaleString()}</div>
+                      <div className="text-xs text-slate-500">Active listings</div>
                     </div>
-                    <div className="rounded-lg bg-gray-50 p-3">
-                      <div className="text-lg font-semibold text-gray-700">
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <div className="text-lg font-semibold text-slate-700">
                         {categoryStats.top_employment_type ?? '—'}
                       </div>
-                      <div className="text-xs text-gray-500">Top employment type</div>
+                      <div className="text-xs text-slate-500">Top employment type</div>
                     </div>
-                    <div className="rounded-lg bg-gray-50 p-3">
-                      <div className="text-lg font-semibold text-gray-700">
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <div className="text-lg font-semibold text-slate-700">
                         {categoryStats.top_position_level ?? '—'}
                       </div>
-                      <div className="text-xs text-gray-500">Top position level</div>
+                      <div className="text-xs text-slate-500">Top position level</div>
                     </div>
-                    <div className="rounded-lg bg-gray-50 p-3">
+                    <div className="rounded-lg bg-slate-50 p-3">
                       <div className="text-xl font-bold text-emerald-600">
                         {categoryStats.avg_salary != null
                           ? `$${(categoryStats.avg_salary / 1000).toFixed(1)}k`
                           : '—'}
                       </div>
-                      <div className="text-xs text-gray-500">Avg min salary</div>
+                      <div className="text-xs text-slate-500">Avg min salary</div>
                     </div>
                   </div>
                   <div className="min-h-[280px]">
-                    <h4 className="text-sm font-medium text-gray-700 mb-2">Active jobs trend</h4>
+                    <h4 className="text-sm font-medium text-slate-700 mb-2">Active jobs trend</h4>
                     <div className="h-[240px] min-h-[200px] w-full">
                       <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={categoryTrends} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
@@ -392,7 +419,7 @@ function DashboardContent() {
                             <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
                           </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                         <XAxis dataKey="date" tickFormatter={(v) => formatDate(v)} fontSize={11} />
                         <YAxis fontSize={11} />
                         <Tooltip
@@ -410,7 +437,7 @@ function DashboardContent() {
                       </ResponsiveContainer>
                     </div>
                     {categoryTrends.length === 0 && !categoryDetailLoading && (
-                      <p className="text-sm text-gray-500 mt-2">No trend data for this category.</p>
+                      <p className="text-sm text-slate-500 mt-2">No trend data for this category.</p>
                     )}
                   </div>
                 </>
@@ -420,15 +447,17 @@ function DashboardContent() {
         </section>
 
         {/* Employment type & Position level & Salary */}
-        <div className="grid md:grid-cols-3 gap-8">
+        <div className="space-y-8">
+          <div className="grid md:grid-cols-2 gap-8">
           <section>
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            <h2 className="text-lg font-semibold text-slate-900 mb-4">
               Employment type
-              <span className="block text-sm font-normal text-gray-500">
+              <span className="block text-sm font-normal text-slate-500">
                 {selectedCategory ? `(${selectedCategory})` : '(All industries)'}
               </span>
             </h2>
-            <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm h-72">
+            <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+              <div className="h-[320px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -437,8 +466,8 @@ function DashboardContent() {
                     nameKey="employment_type"
                     cx="50%"
                     cy="50%"
-                    innerRadius={50}
-                    outerRadius={80}
+                    innerRadius={60}
+                    outerRadius={110}
                     paddingAngle={2}
                     label={({ employment_type, percent }) =>
                       percent ? `${employment_type} ${(percent * 100).toFixed(0)}%` : employment_type
@@ -451,46 +480,52 @@ function DashboardContent() {
                   <Tooltip formatter={(value: number) => [value.toLocaleString(), 'Jobs']} />
                 </PieChart>
               </ResponsiveContainer>
+              </div>
             </div>
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            <h2 className="text-lg font-semibold text-slate-900 mb-4">
               Position level
-              <span className="block text-sm font-normal text-gray-500">
+              <span className="block text-sm font-normal text-slate-500">
                 {selectedCategory ? `(${selectedCategory})` : '(All industries)'}
               </span>
             </h2>
-            <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm h-72">
+            <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+              <div className="h-[320px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={positionData} layout="vertical" margin={{ left: 70, right: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <BarChart data={positionData} layout="vertical" margin={{ left: 100, right: 24 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis type="number" fontSize={11} />
-                  <YAxis type="category" dataKey="position_level" width={65} fontSize={10} />
+                  <YAxis type="category" dataKey="position_level" width={95} fontSize={11} />
                   <Tooltip formatter={(value: number) => [value.toLocaleString(), 'Jobs']} />
-                  <Bar dataKey="count" name="Jobs" fill="#0ea5e9" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="count" name="Jobs" fill={CHART_COLORS[5]} radius={[0, 4, 4, 0]} barSize={24} />
                 </BarChart>
               </ResponsiveContainer>
+              </div>
             </div>
           </section>
+          </div>
 
           <section>
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            <h2 className="text-lg font-semibold text-slate-900 mb-4">
               Salary distribution (min)
-              <span className="block text-sm font-normal text-gray-500">
+              <span className="block text-sm font-normal text-slate-500">
                 {selectedCategory ? `(${selectedCategory})` : '(All industries)'}
               </span>
             </h2>
-            <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm h-72">
+            <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+              <div className="h-[280px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={salaryData} margin={{ left: 10, right: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <BarChart data={salaryData} margin={{ left: 10, right: 24 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis dataKey="bucket" fontSize={11} />
                   <YAxis fontSize={11} />
                   <Tooltip formatter={(value: number) => [value.toLocaleString(), 'Jobs']} />
-                  <Bar dataKey="count" name="Jobs" fill="#10b981" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="count" name="Jobs" fill={CHART_COLORS[2]} radius={[4, 4, 0, 0]} barSize={36} />
                 </BarChart>
               </ResponsiveContainer>
+              </div>
             </div>
           </section>
         </div>

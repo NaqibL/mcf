@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
+
 # BGE retrieval models perform best when the *query* (the thing being searched
 # with) carries a task-specific instruction prefix.  Passages (job descriptions)
 # do NOT get this prefix.  See: https://huggingface.co/BAAI/bge-small-en-v1.5
 _BGE_QUERY_PREFIX = "Represent this resume for job search: "
+
 
 
 @dataclass(frozen=True)
@@ -66,4 +69,35 @@ class Embedder:
         is_bge = "bge" in self.config.model_name.lower()
         query = (_BGE_QUERY_PREFIX + text) if is_bge else text
         return self.embed_texts([query])[0]
+
+    def embed_resume(self, text: str, chunk_size: int = 400, overlap: int = 80) -> list[float]:
+        """Embed resume text, chunking if long to avoid BGE 512-token truncation.
+
+        For short resumes (≤ chunk_size tokens approx) this is a single embed_query.
+        For longer resumes, splits into overlapping chunks, embeds each, then
+        L2-normalizes the mean of chunk embeddings.
+        """
+        words = text.split()
+        # ~0.75 words per token; chunk_size tokens ≈ chunk_size * 4/3 words
+        max_words = int(chunk_size * 4 / 3)
+        overlap_words = int(overlap * 4 / 3)
+
+        if len(words) <= max_words:
+            return self.embed_query(text)
+
+        chunks: list[str] = []
+        start = 0
+        while start < len(words):
+            end = min(start + max_words, len(words))
+            chunks.append(" ".join(words[start:end]))
+            if end >= len(words):
+                break
+            start = end - overlap_words
+
+        embeddings = [self.embed_query(c) for c in chunks]
+        mean_vec = np.array(embeddings, dtype=np.float32).mean(axis=0)
+        norm = float(np.linalg.norm(mean_vec))
+        if norm > 0:
+            mean_vec = mean_vec / norm
+        return mean_vec.tolist()
 
