@@ -147,6 +147,17 @@ export const dashboardApi = {
       jobs_needing_backfill: number
     }
   },
+  getSummaryPublic: async () => {
+    const response = await api.get('/api/dashboard/summary-public')
+    return response.data as {
+      total_jobs: number
+      active_jobs: number
+      inactive_jobs: number
+      by_source: Record<string, number>
+      jobs_with_embeddings: number
+      jobs_needing_backfill: number
+    }
+  },
   getJobsOverTimePostedAndRemoved: async (limitDays = 90) => {
     const response = await api.get('/api/dashboard/jobs-over-time-posted-and-removed', {
       params: { limit_days: limitDays },
@@ -173,6 +184,12 @@ export const dashboardApi = {
   },
   getJobsByCategory: async (limitDays = 90, limit = 30) => {
     const response = await api.get('/api/dashboard/jobs-by-category', {
+      params: { limit_days: limitDays, limit },
+    })
+    return response.data as Array<{ category: string; count: number }>
+  },
+  getJobsByCategoryPublic: async (limitDays = 30, limit = 8) => {
+    const response = await api.get('/api/dashboard/jobs-by-category-public', {
       params: { limit_days: limitDays, limit },
     })
     return response.data as Array<{ category: string; count: number }>

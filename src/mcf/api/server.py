@@ -154,6 +154,13 @@ def get_dashboard_summary(user_id: str = Depends(get_current_user)):
     return store.get_dashboard_summary()
 
 
+@app.get("/api/dashboard/summary-public")
+def get_dashboard_summary_public():
+    """Public endpoint for summary stats (no auth). Used on login screen."""
+    store = get_store()
+    return store.get_dashboard_summary()
+
+
 @app.get("/api/dashboard/jobs-over-time-posted-and-removed")
 def get_dashboard_jobs_over_time_posted_and_removed(
     limit_days: int = Query(default=90, ge=1, le=365),
@@ -190,6 +197,16 @@ def get_dashboard_jobs_by_category(
     user_id: str = Depends(get_current_user),
 ):
     """Return job counts by MCF category (from job_daily_stats)."""
+    store = get_store()
+    return store.get_jobs_by_category(limit_days=limit_days, limit=limit)
+
+
+@app.get("/api/dashboard/jobs-by-category-public")
+def get_dashboard_jobs_by_category_public(
+    limit_days: int = Query(default=30, ge=1, le=90),
+    limit: int = Query(default=8, ge=1, le=20),
+):
+    """Public endpoint for jobs by category (no auth). Used on login screen."""
     store = get_store()
     return store.get_jobs_by_category(limit_days=limit_days, limit=limit)
 
