@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { Briefcase, CheckCircle, XCircle, Database, AlertCircle, BarChart2 } from 'lucide-react'
 import { dashboardApi } from '@/lib/api'
+import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import AuthGate from '../components/AuthGate'
 import { Layout } from '../components/layout'
 import NavUserActions from '../components/NavUserActions'
@@ -169,10 +170,15 @@ function DashboardContent() {
     [selectedCategory, categoryStats, salaryDistribution]
   )
 
+  const hasRetriedRef = useRef(false)
+
   useEffect(() => {
-    const load = async () => {
+    const load = async (isRetry = false) => {
       setLoading(true)
       try {
+        if (isSupabaseConfigured) {
+          await supabase.auth.getSession()
+        }
         const [s, jpr, ajo, jbc, jbet, jbpl, sd] = await Promise.all([
           dashboardApi.getSummary(),
           dashboardApi.getJobsOverTimePostedAndRemoved(limitDays),
@@ -189,8 +195,14 @@ function DashboardContent() {
         setJobsByEmploymentType((jbet || []).filter((x) => x.employment_type !== 'Unknown'))
         setJobsByPositionLevel((jbpl || []).filter((x) => x.position_level !== 'Unknown'))
         setSalaryDistribution(sd || [])
+        hasRetriedRef.current = false
       } catch (err: unknown) {
-        toast.error('Failed to load dashboard. Is the API server running?')
+        if (!isRetry && !hasRetriedRef.current) {
+          hasRetriedRef.current = true
+          setTimeout(() => load(true), 1500)
+        } else {
+          toast.error('Failed to load dashboard. Is the API server running?')
+        }
       } finally {
         setLoading(false)
       }

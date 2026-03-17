@@ -15,9 +15,9 @@ import { Button } from '@/components/ui/button'
 import Spinner from './Spinner'
 import { toast } from 'sonner'
 import { RefreshCw, Sparkles } from 'lucide-react'
+import { TutorialModal, getTutorialStep, hasSeenTutorial } from './TutorialModal'
 
 const JOBS_PER_PAGE = 25
-const TUTORIAL_STORAGE_KEY = 'mcf_has_seen_resume_tutorial'
 
 interface Filters {
   minSimilarity: number
@@ -36,21 +36,25 @@ export default function ResumeTab() {
   const debouncedFilters = useDebouncedValue(localFilters, 300)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [sessionOffset, setSessionOffset] = useState(0)
-  const [hasSeenTutorial, setHasSeenTutorial] = useState(false)
+  const [showTutorialStep3, setShowTutorialStep3] = useState(false)
+  const [showTutorialStep4, setShowTutorialStep4] = useState(false)
   const sessionRef = useRef<{ sessionId: string | null; sessionOffset: number }>({ sessionId: null, sessionOffset: 0 })
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setHasSeenTutorial(!!localStorage.getItem(TUTORIAL_STORAGE_KEY))
+    if (hasSeenTutorial()) return
+    const step = getTutorialStep()
+    if (step === 3 && jobs.length > 0) {
+      setShowTutorialStep3(true)
     }
-  }, [])
+  }, [jobs.length])
 
-  const dismissTutorial = useCallback(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(TUTORIAL_STORAGE_KEY, '1')
+  useEffect(() => {
+    if (hasSeenTutorial()) return
+    const step = getTutorialStep()
+    if (step === 4 && (stats?.interested ?? 0) > 0) {
+      setShowTutorialStep4(true)
     }
-    setHasSeenTutorial(true)
-  }, [])
+  }, [stats?.interested])
 
   const loadStats = useCallback(async () => {
     try {
@@ -285,25 +289,7 @@ export default function ResumeTab() {
       </Card>
 
       {loading && jobs.length === 0 ? (
-        <>
-          <LoadingState variant="matches" count={5} />
-          {!hasSeenTutorial && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-              <div className="max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-lg dark:border-slate-700 dark:bg-slate-800">
-                <h3 className="mb-2 text-lg font-semibold text-slate-900 dark:text-slate-100">
-                  First time here?
-                </h3>
-                <p className="mb-6 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-                  Matching takes a few seconds because we scan thousands of jobs to find your best matches. This is
-                  normal — you&apos;ll only wait once. Subsequent loads and filter changes are much faster.
-                </p>
-                <Button onClick={dismissTutorial} className="w-full">
-                  Got it
-                </Button>
-              </div>
-            </div>
-          )}
-        </>
+        <LoadingState variant="matches" count={5} />
       ) : !loading && jobs.length === 0 ? (
         <Card className="border-slate-200 dark:border-slate-700">
           <CardBody>
@@ -364,6 +350,13 @@ export default function ResumeTab() {
             </div>
           </div>
         </div>
+      )}
+
+      {showTutorialStep3 && (
+        <TutorialModal step={3} onClose={() => setShowTutorialStep3(false)} />
+      )}
+      {showTutorialStep4 && (
+        <TutorialModal step={4} onClose={() => setShowTutorialStep4(false)} />
       )}
     </div>
   )

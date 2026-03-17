@@ -12,6 +12,7 @@ import { PageHeader, Card, CardBody, EmptyState, LoadingState } from '@/componen
 import { Button } from '@/components/ui/button'
 import { MatchesErrorBoundary } from './MatchesErrorBoundary'
 import Spinner from './components/Spinner'
+import { TutorialModal, getTutorialStep, hasSeenTutorial, setTutorialStep } from './components/TutorialModal'
 import { toast } from 'sonner'
 import { Upload, RefreshCw, FileWarning } from 'lucide-react'
 
@@ -38,18 +39,26 @@ function MatchesHeaderActions({
   processingResume,
   onUploadClick,
   onProcessResume,
+  onStartTutorial,
 }: {
   profile: Profile | null
   loadingProfile: boolean
   processingResume: boolean
   onUploadClick: () => void
   onProcessResume: () => void
+  onStartTutorial?: () => void
   fileInputRef?: React.RefObject<HTMLInputElement | null>
 }) {
   if (loadingProfile || !isSupabaseConfigured) return null
+  const showTutorialButton = onStartTutorial && !hasSeenTutorial()
 
   return (
     <div className="flex flex-wrap items-center gap-3">
+      {showTutorialButton && (
+        <Button variant="outline" size="sm" onClick={onStartTutorial} className="text-slate-600 dark:text-slate-400">
+          First time? Start tutorial
+        </Button>
+      )}
       {profile?.profile ? (
         <>
           <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
@@ -173,6 +182,42 @@ function App() {
 
   const needsResume = !loadingProfile && profile && !profile.resume_exists && !profile.profile
 
+  const [tutorialStep, setTutorialStepState] = useState<number | null>(null)
+  const [showTutorial, setShowTutorial] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (hasSeenTutorial()) return
+    const step = getTutorialStep()
+    if (needsResume && step === 1) {
+      setShowTutorial(true)
+      setTutorialStepState(1)
+    } else if (profile?.profile && step === 2) {
+      setShowTutorial(true)
+      setTutorialStepState(2)
+    } else if (profile?.profile && step === 1) {
+      setTutorialStep(2)
+      setShowTutorial(true)
+      setTutorialStepState(2)
+    }
+  }, [needsResume, profile?.profile])
+
+  const handleStartTutorial = useCallback(() => {
+    if (needsResume) {
+      setTutorialStepState(1)
+    } else if (profile?.profile) {
+      setTutorialStepState(2)
+    } else {
+      setTutorialStepState(1)
+    }
+    setShowTutorial(true)
+  }, [needsResume, profile?.profile])
+
+  const handleTutorialClose = useCallback(() => {
+    setShowTutorial(false)
+    setTutorialStepState(null)
+  }, [])
+
   return (
     <Layout
       userSlot={
@@ -182,10 +227,18 @@ function App() {
           processingResume={processingResume}
           onUploadClick={onUploadClick}
           onProcessResume={handleProcessResume}
+          onStartTutorial={handleStartTutorial}
           fileInputRef={fileInputRef}
         />
       }
     >
+      {showTutorial && tutorialStep && tutorialStep <= 2 && (
+        <TutorialModal
+          step={tutorialStep as 1 | 2}
+          onClose={handleTutorialClose}
+          onUploadClick={tutorialStep === 1 ? onUploadClick : undefined}
+        />
+      )}
       <MatchesErrorBoundary>
         <input
           ref={fileInputRef}

@@ -130,6 +130,14 @@ def mark_interaction(
     return {"status": "ok", "job_uuid": job_uuid, "interaction_type": interaction_type}
 
 
+@app.get("/api/jobs/interested")
+def get_interested_jobs(user_id: str = Depends(get_current_user)):
+    """Return jobs the user has marked as interested, ordered by most recent first."""
+    store = get_store()
+    jobs = store.get_interested_jobs(user_id=user_id)
+    return {"jobs": jobs}
+
+
 # ---------------------------------------------------------------------------
 # Discover endpoints
 # ---------------------------------------------------------------------------

@@ -796,6 +796,34 @@ class PostgresStore(Storage):
             )
             return [r[0] for r in cur.fetchall()]
 
+    def get_interested_jobs(self, user_id: str) -> list[dict]:
+        """Return interested jobs with job details, ordered by interacted_at desc."""
+        with self._cur() as cur:
+            cur.execute(
+                """
+                SELECT j.job_uuid, j.title, j.company_name, j.location, j.job_url, j.last_seen_at, j.skills_json
+                  FROM jobs j
+                  JOIN job_interactions i ON i.job_uuid = j.job_uuid
+                 WHERE i.user_id = %s AND i.interaction_type = 'interested'
+                 ORDER BY i.interacted_at DESC
+                """,
+                [user_id],
+            )
+            rows = cur.fetchall()
+        return [
+            {
+                "job_uuid": r[0],
+                "title": r[1] or "",
+                "company_name": r[2],
+                "location": r[3],
+                "job_url": r[4],
+                "last_seen_at": r[5],
+                "similarity_score": 1.0,
+                "job_skills": json.loads(r[6]) if r[6] else [],
+            }
+            for r in rows
+        ]
+
     def reset_profile_ratings(self, user_id: str) -> dict:
         """Reset job interactions and taste profile for a user (for testing)."""
         profile = self.get_profile_by_user_id(user_id)

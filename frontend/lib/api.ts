@@ -33,6 +33,11 @@ api.interceptors.request.use(async (config) => {
 
 // Jobs API
 export const jobsApi = {
+  getInterested: async () => {
+    const response = await api.get('/api/jobs/interested')
+    return response.data as { jobs: import('./types').Match[] }
+  },
+
   markInteraction: async (jobUuid: string, interactionType: string) => {
     const response = await api.post(`/api/jobs/${jobUuid}/interact`, null, {
       params: { interaction_type: interactionType },

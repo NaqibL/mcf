@@ -3,11 +3,12 @@
 import { useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Menu, X, Briefcase, BarChart2, HelpCircle } from 'lucide-react'
+import { Menu, X, Briefcase, BarChart2, HelpCircle, Bookmark } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navLinks = [
   { href: '/', label: 'Matches', icon: Briefcase },
+  { href: '/saved', label: 'Saved', icon: Bookmark },
   { href: '/dashboard', label: 'Dashboard', icon: BarChart2 },
   { href: '/how-it-works', label: 'How it works', icon: HelpCircle },
 ]

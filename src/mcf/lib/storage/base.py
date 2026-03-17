@@ -252,6 +252,11 @@ class Storage(ABC):
     @abstractmethod
     def get_not_interested_job_uuids(self, user_id: str) -> list[str]: ...
 
+    def get_interested_jobs(self, user_id: str) -> list[dict]:
+        """Return interested jobs with job details, ordered by interacted_at desc (most recent first).
+        Each dict has job fields plus similarity_score=1 for Match display."""
+        raise NotImplementedError
+
     # === Discover ===
 
     @abstractmethod

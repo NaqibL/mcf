@@ -31,9 +31,9 @@ function RecencyBadge({ daysAgo }: { daysAgo: number | null }) {
 
 interface MatchCardProps {
   match: Match
-  onInteraction: (uuid: string, type: string) => void
+  onInteraction?: (uuid: string, type: string) => void
   loading?: boolean
-  mode: 'resume' | 'taste'
+  mode: 'resume' | 'taste' | 'saved'
 }
 
 function ScoreBadge({ score }: { score: number }) {
@@ -129,8 +129,8 @@ export const MatchCard = React.memo(function MatchCard({ match, onInteraction, l
           </div>
         )}
 
-        {/* Taste mode skills */}
-        {mode === 'taste' && match.job_skills && match.job_skills.length > 0 && (
+        {/* Taste / saved mode skills */}
+        {(mode === 'taste' || mode === 'saved') && match.job_skills && match.job_skills.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-3">
             {match.job_skills.slice(0, 6).map((s) => (
               <span
@@ -156,24 +156,41 @@ export const MatchCard = React.memo(function MatchCard({ match, onInteraction, l
         )}
       </div>
 
-      <div className="border-t border-slate-100 flex dark:border-slate-700">
-        <button
-          onClick={() => onInteraction(match.job_uuid, 'not_interested')}
-          className="flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors
-            bg-slate-100 text-slate-700 hover:bg-rose-50 hover:text-rose-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-rose-900/30 dark:hover:text-rose-400"
-        >
-          <span className="text-base leading-none">✕</span>
-          Not Interested
-        </button>
-        <button
-          onClick={() => onInteraction(match.job_uuid, 'interested')}
-          className="flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium
-            bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
-        >
-          <span className="text-base leading-none">✓</span>
-          Interested
-        </button>
-      </div>
+      {mode === 'saved' ? (
+        onInteraction && (
+          <div className="border-t border-slate-100 dark:border-slate-700">
+            <button
+              onClick={() => onInteraction(match.job_uuid, 'not_interested')}
+              className="w-full flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors
+                bg-slate-100 text-slate-700 hover:bg-rose-50 hover:text-rose-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-rose-900/30 dark:hover:text-rose-400"
+            >
+              <span className="text-base leading-none">✕</span>
+              Remove from saved
+            </button>
+          </div>
+        )
+      ) : (
+        onInteraction && (
+          <div className="border-t border-slate-100 flex dark:border-slate-700">
+            <button
+              onClick={() => onInteraction(match.job_uuid, 'not_interested')}
+              className="flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors
+                bg-slate-100 text-slate-700 hover:bg-rose-50 hover:text-rose-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-rose-900/30 dark:hover:text-rose-400"
+            >
+              <span className="text-base leading-none">✕</span>
+              Not Interested
+            </button>
+            <button
+              onClick={() => onInteraction(match.job_uuid, 'interested')}
+              className="flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium
+                bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+            >
+              <span className="text-base leading-none">✓</span>
+              Interested
+            </button>
+          </div>
+        )
+      )}
     </div>
   )
 })

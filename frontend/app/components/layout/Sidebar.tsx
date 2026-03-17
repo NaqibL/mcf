@@ -2,11 +2,12 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Briefcase, BarChart2, HelpCircle } from 'lucide-react'
+import { Briefcase, BarChart2, HelpCircle, Bookmark } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navLinks = [
   { href: '/', label: 'Resume Matching', icon: Briefcase },
+  { href: '/saved', label: 'Saved Jobs', icon: Bookmark },
   { href: '/dashboard', label: 'Dashboard', icon: BarChart2 },
   { href: '/how-it-works', label: 'How it works', icon: HelpCircle },
 ]
