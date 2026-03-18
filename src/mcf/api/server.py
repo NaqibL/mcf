@@ -174,7 +174,7 @@ def get_dashboard_jobs_over_time_posted_and_removed(
     limit_days: int = Query(default=90, ge=1, le=365),
     user_id: str = Depends(get_current_user),
 ):
-    """Return daily posted (active) and removed (inactive) job counts by date."""
+    """Return daily added and removed job counts from job_daily_stats."""
     store = get_store()
     return store.get_jobs_over_time_posted_and_removed(limit_days=limit_days)
 

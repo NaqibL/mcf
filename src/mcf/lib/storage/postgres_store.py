@@ -963,104 +963,45 @@ class PostgresStore(Storage):
         from datetime import timedelta
 
         cutoff = _utcnow().date() - timedelta(days=limit_days)
-        mcf = "AND (job_source = 'mcf' OR job_source IS NULL)"
 
-        # Posted: active jobs by posted_date (fallback to first_seen_at when posted_date is null)
         with self._cur() as cur:
             cur.execute(
-                f"""
-                SELECT COALESCE(posted_date::date, first_seen_at::date) AS day, COUNT(*) AS count
-                FROM jobs
-                WHERE is_active = TRUE
-                  AND (posted_date IS NOT NULL OR first_seen_at IS NOT NULL)
-                  AND COALESCE(posted_date::date, first_seen_at::date) >= %s {mcf}
-                GROUP BY COALESCE(posted_date::date, first_seen_at::date)
-                ORDER BY day ASC
+                """
+                SELECT stat_date::date AS day,
+                       SUM(added_count)::int AS added_count,
+                       SUM(removed_count)::int AS removed_count
+                FROM job_daily_stats
+                WHERE stat_date >= %s AND category != 'Unknown'
+                GROUP BY stat_date
+                ORDER BY stat_date ASC
                 """,
                 [cutoff],
             )
-            posted_rows = {str(r[0]): r[1] for r in cur.fetchall()}
+            rows = cur.fetchall()
 
-        # Removed: inactive jobs by last_seen_at (fallback to first_seen_at when last_seen_at is null)
-        with self._cur() as cur:
-            cur.execute(
-                f"""
-                SELECT COALESCE(last_seen_at::date, first_seen_at::date) AS day, COUNT(*) AS count
-                FROM jobs
-                WHERE is_active = FALSE
-                  AND (last_seen_at IS NOT NULL OR first_seen_at IS NOT NULL)
-                  AND COALESCE(last_seen_at::date, first_seen_at::date) >= %s {mcf}
-                GROUP BY COALESCE(last_seen_at::date, first_seen_at::date)
-                ORDER BY day ASC
-                """,
-                [cutoff],
-            )
-            removed_rows = {str(r[0]): r[1] for r in cur.fetchall()}
-
-        all_dates = sorted(set(posted_rows.keys()) | set(removed_rows.keys()))
-        cumulative_posted = 0
-        cumulative_removed = 0
-        result = []
-        for d in all_dates:
-            p = posted_rows.get(d, 0)
-            r = removed_rows.get(d, 0)
-            cumulative_posted += p
-            cumulative_removed += r
-            result.append({
-                "date": d,
-                "posted_count": p,
-                "removed_count": r,
-                "cumulative_posted": cumulative_posted,
-                "cumulative_removed": cumulative_removed,
-            })
-        return result
+        return [
+            {"date": str(r[0]), "added_count": r[1], "removed_count": r[2]}
+            for r in rows
+        ]
 
     def get_active_jobs_over_time(self, limit_days: int = 90) -> list[dict]:
         from datetime import timedelta
 
         cutoff = _utcnow().date() - timedelta(days=limit_days)
-        today = _utcnow().date()
 
-        with self._cur() as cur:
-            try:
-                cur.execute(
-                    """
-                    SELECT stat_date::date AS day, SUM(active_count)::int AS active_count
-                    FROM job_daily_stats
-                    WHERE stat_date >= %s AND category != 'Unknown'
-                    GROUP BY stat_date
-                    ORDER BY stat_date ASC
-                    """,
-                    [cutoff],
-                )
-                rows = cur.fetchall()
-            except Exception:
-                rows = []
-
-        if rows:
-            return [{"date": str(r[0]), "active_count": r[1]} for r in rows]
-
-        # Fallback: compute from jobs table when job_daily_stats is empty
         with self._cur() as cur:
             cur.execute(
-                f"""
-                WITH date_series AS (
-                    SELECT generate_series(%s::date, %s::date, '1 day'::interval)::date AS d
-                )
-                SELECT ds.d::text AS date,
-                    (SELECT COUNT(*)::int FROM jobs j
-                     WHERE (j.job_source = 'mcf' OR j.job_source IS NULL)
-                       AND j.posted_date IS NOT NULL
-                       AND j.posted_date::date <= ds.d
-                       AND (j.is_active = TRUE
-                            OR (j.last_seen_at IS NOT NULL AND j.last_seen_at::date > ds.d))
-                    ) AS active_count
-                FROM date_series ds
-                ORDER BY ds.d
+                """
+                SELECT stat_date::date AS day, SUM(active_count)::int AS active_count
+                FROM job_daily_stats
+                WHERE stat_date >= %s AND category != 'Unknown'
+                GROUP BY stat_date
+                ORDER BY stat_date ASC
                 """,
-                [cutoff, today],
+                [cutoff],
             )
             rows = cur.fetchall()
+
         return [{"date": str(r[0]), "active_count": r[1]} for r in rows]
 
     def backfill_job_daily_stats(self, limit_days: int = 365) -> dict:
@@ -1173,8 +1114,8 @@ class PostgresStore(Storage):
                     ON CONFLICT (stat_date, category, employment_type, position_level)
                     DO UPDATE SET
                         active_count  = EXCLUDED.active_count,
-                        added_count   = EXCLUDED.added_count,
-                        removed_count = EXCLUDED.removed_count
+                        added_count   = job_daily_stats.added_count + EXCLUDED.added_count,
+                        removed_count = job_daily_stats.removed_count + EXCLUDED.removed_count
                     """,
                     [today, run_id],
                 )

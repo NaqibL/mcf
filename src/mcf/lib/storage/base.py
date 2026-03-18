@@ -268,11 +268,13 @@ class Storage(ABC):
     def get_dashboard_summary(self) -> dict: ...
 
     def get_jobs_over_time_posted_and_removed(self, limit_days: int = 90) -> list[dict]:
-        """Jobs by posted_date (active) and by last_seen_at (removed). Returns list of {date, posted_count, removed_count, cumulative_posted, cumulative_removed}."""
+        """Added and removed counts per day from job_daily_stats (primary source only).
+        Returns list of {date, added_count, removed_count}. Empty if job_daily_stats has no data."""
         raise NotImplementedError
 
     def get_active_jobs_over_time(self, limit_days: int = 90) -> list[dict]:
-        """Total active jobs per day from job_daily_stats. Returns list of {date, active_count}."""
+        """Total active jobs per day from job_daily_stats (primary source only).
+        Returns list of {date, active_count}. Empty if job_daily_stats has no data."""
         raise NotImplementedError
 
     @abstractmethod

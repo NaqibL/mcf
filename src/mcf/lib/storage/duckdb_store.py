@@ -1043,94 +1043,42 @@ class DuckDBStore(Storage):
         from datetime import timedelta
 
         cutoff = _utcnow().date() - timedelta(days=limit_days)
-        mcf = "AND (job_source = 'mcf' OR job_source IS NULL)"
 
         rows = self._con.execute(
-            f"""
-            SELECT CAST(COALESCE(posted_date, first_seen_at) AS DATE) AS day, COUNT(*) AS count
-            FROM jobs
-            WHERE is_active = TRUE
-              AND (posted_date IS NOT NULL OR first_seen_at IS NOT NULL)
-              AND CAST(COALESCE(posted_date, first_seen_at) AS DATE) >= ? {mcf}
-            GROUP BY CAST(COALESCE(posted_date, first_seen_at) AS DATE)
+            """
+            SELECT stat_date AS day,
+                   SUM(added_count)::INTEGER AS added_count,
+                   SUM(removed_count)::INTEGER AS removed_count
+            FROM job_daily_stats
+            WHERE stat_date >= ? AND category != 'Unknown'
+            GROUP BY stat_date
+            ORDER BY stat_date ASC
             """,
             [cutoff],
         ).fetchall()
-        posted_rows = {str(r[0]): r[1] for r in rows}
 
-        rows = self._con.execute(
-            f"""
-            SELECT CAST(COALESCE(last_seen_at, first_seen_at) AS DATE) AS day, COUNT(*) AS count
-            FROM jobs
-            WHERE is_active = FALSE
-              AND (last_seen_at IS NOT NULL OR first_seen_at IS NOT NULL)
-              AND CAST(COALESCE(last_seen_at, first_seen_at) AS DATE) >= ? {mcf}
-            GROUP BY CAST(COALESCE(last_seen_at, first_seen_at) AS DATE)
-            """,
-            [cutoff],
-        ).fetchall()
-        removed_rows = {str(r[0]): r[1] for r in rows}
-
-        all_dates = sorted(set(posted_rows.keys()) | set(removed_rows.keys()))
-        cumulative_posted = 0
-        cumulative_removed = 0
-        result = []
-        for d in all_dates:
-            p = posted_rows.get(d, 0)
-            r = removed_rows.get(d, 0)
-            cumulative_posted += p
-            cumulative_removed += r
-            result.append({
-                "date": d,
-                "posted_count": p,
-                "removed_count": r,
-                "cumulative_posted": cumulative_posted,
-                "cumulative_removed": cumulative_removed,
-            })
-        return result
+        return [
+            {"date": str(r[0]), "added_count": r[1], "removed_count": r[2]}
+            for r in rows
+        ]
 
     def get_active_jobs_over_time(self, limit_days: int = 90) -> list[dict]:
         from datetime import timedelta
 
         cutoff = _utcnow().date() - timedelta(days=limit_days)
-        today = _utcnow().date()
 
-        try:
-            rows = self._con.execute(
-                """
-                SELECT stat_date AS day, SUM(active_count)::INTEGER AS active_count
-                FROM job_daily_stats
-                WHERE stat_date >= ? AND category != 'Unknown'
-                GROUP BY stat_date
-                ORDER BY stat_date ASC
-                """,
-                [cutoff],
-            ).fetchall()
-        except duckdb.ProgrammingError:
-            rows = []
+        rows = self._con.execute(
+            """
+            SELECT stat_date AS day, SUM(active_count)::INTEGER AS active_count
+            FROM job_daily_stats
+            WHERE stat_date >= ? AND category != 'Unknown'
+            GROUP BY stat_date
+            ORDER BY stat_date ASC
+            """,
+            [cutoff],
+        ).fetchall()
 
-        if rows:
-            return [{"date": str(r[0]), "active_count": r[1]} for r in rows]
-
-        # Fallback: compute from jobs table when job_daily_stats is empty
-        result = []
-        for i in range(limit_days + 1):
-            d = cutoff + timedelta(days=i)
-            if d > today:
-                break
-            row = self._con.execute(
-                """
-                SELECT COUNT(*)::INTEGER FROM jobs j
-                WHERE (j.job_source = 'mcf' OR j.job_source IS NULL)
-                  AND j.posted_date IS NOT NULL
-                  AND CAST(j.posted_date AS DATE) <= ?
-                  AND (j.is_active = TRUE
-                       OR (j.last_seen_at IS NOT NULL AND CAST(j.last_seen_at AS DATE) > ?))
-                """,
-                [d, d],
-            ).fetchone()
-            result.append({"date": str(d), "active_count": row[0] if row else 0})
-        return result
+        return [{"date": str(r[0]), "active_count": r[1]} for r in rows]
 
     def backfill_job_daily_stats(self, limit_days: int = 365) -> dict:
         """One-time backfill of job_daily_stats from jobs table for historical dates."""
@@ -1255,8 +1203,8 @@ class DuckDBStore(Storage):
                 ON CONFLICT (stat_date, category, employment_type, position_level)
                 DO UPDATE SET
                     active_count = EXCLUDED.active_count,
-                    added_count = EXCLUDED.added_count,
-                    removed_count = EXCLUDED.removed_count
+                    added_count = job_daily_stats.added_count + EXCLUDED.added_count,
+                    removed_count = job_daily_stats.removed_count + EXCLUDED.removed_count
                 """,
                 [today, cat, et, pl, counts["active_count"], counts["added_count"], counts["removed_count"]],
             )

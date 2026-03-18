@@ -169,10 +169,8 @@ export const dashboardApi = {
     })
     return response.data as Array<{
       date: string
-      posted_count: number
+      added_count: number
       removed_count: number
-      cumulative_posted: number
-      cumulative_removed: number
     }>
   },
   getActiveJobsOverTime: async (limitDays = 90) => {

@@ -44,10 +44,8 @@ type Summary = {
 
 type JobsPostedRemovedPoint = {
   date: string
-  posted_count: number
+  added_count: number
   removed_count: number
-  cumulative_posted: number
-  cumulative_removed: number
 }
 
 type CategoryStats = {
@@ -143,7 +141,7 @@ function DashboardContent() {
 
   const getPostedRemovedDomainMax = useCallback(() => {
     if (!jobsPostedAndRemoved.length) return 100
-    const values = jobsPostedAndRemoved.flatMap((d) => [d.posted_count, d.removed_count]).filter((v) => v > 0)
+    const values = jobsPostedAndRemoved.flatMap((d) => [d.added_count, d.removed_count]).filter((v) => v > 0)
     if (!values.length) return 100
     const sorted = [...values].sort((a, b) => a - b)
     const p90Index = Math.floor(sorted.length * 0.9)

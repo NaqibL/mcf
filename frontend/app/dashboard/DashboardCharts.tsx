@@ -37,10 +37,8 @@ const CHART_COLORS = [
 
 type JobsPostedRemovedPoint = {
   date: string
-  posted_count: number
+  added_count: number
   removed_count: number
-  cumulative_posted: number
-  cumulative_removed: number
 }
 
 type CategoryStats = {
@@ -95,14 +93,14 @@ export function DashboardCharts({
         <div className="space-y-6">
           <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-800">
             <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-4">
-              Posted vs removed
+              Added vs removed
             </h3>
             <div className="h-[280px] w-full min-h-[200px] sm:h-[300px]">
               {jobsPostedAndRemoved.length === 0 ? (
                 <EmptyState
                   icon={BarChart2}
                   message="No data for this period"
-                  description="Posted and removed counts will appear once jobs are crawled."
+                  description="Added and removed counts will appear once jobs are crawled."
                   className="h-full py-8"
                 />
               ) : (
@@ -122,7 +120,7 @@ export function DashboardCharts({
                     labelFormatter={(label) => formatDate(label)}
                   />
                   <Legend />
-                  <Bar dataKey="posted_count" name="Posted" fill="rgb(16, 185, 129)" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="added_count" name="Added" fill="rgb(16, 185, 129)" radius={[2, 2, 0, 0]} />
                   <Bar dataKey="removed_count" name="Removed" fill="rgb(239, 68, 68)" radius={[2, 2, 0, 0]} />
                 </BarChart>
                 </ResponsiveContainer>
