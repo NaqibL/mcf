@@ -10,7 +10,7 @@ export default function AdminPage() {
         <div className="container mx-auto max-w-3xl space-y-6 px-4 py-8">
           <PageHeader
             title="Cache Admin"
-            description="View cache stats, clear keys, and force revalidation."
+            subtitle="View cache stats, clear keys, and force revalidation."
           />
           <div className="flex gap-2">
             <Link
