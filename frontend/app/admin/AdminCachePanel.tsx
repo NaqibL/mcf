@@ -15,7 +15,7 @@ type CacheStats = {
 function getAuthHeaders(): Promise<Record<string, string>> {
   return supabase.auth.getSession().then(({ data }) => {
     const token = data.session?.access_token
-    return token ? { Authorization: `Bearer ${token}` } : {}
+    return (token ? { Authorization: `Bearer ${token}` } : {}) as Record<string, string>
   })
 }
 
