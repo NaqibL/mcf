@@ -43,7 +43,7 @@ function MatchesHeaderActions({
   onProcessResume,
   onStartTutorial,
 }: {
-  profile: { profile?: unknown; resume_exists?: boolean } | null
+  profile: { profile?: unknown; resume_exists?: boolean } | null | undefined
   loadingProfile: boolean
   processingResume: boolean
   onUploadClick: () => void
@@ -190,7 +190,7 @@ function App({ session }: { session: Session | null }) {
       setShowTutorial(true)
       setTutorialStepState(2)
     } else if (profile?.profile && step === 1) {
-      setTutorialStep(2)
+      setTutorialStepState(2)
       setShowTutorial(true)
       setTutorialStepState(2)
     }

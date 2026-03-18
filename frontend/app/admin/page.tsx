@@ -1,3 +1,5 @@
+'use client'
+
 import { AdminCachePanel } from './AdminCachePanel'
 import AuthGate from '@/app/components/AuthGate'
 import { PageHeader } from '@/components/design'
