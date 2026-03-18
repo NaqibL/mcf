@@ -1,8 +1,8 @@
 import axios from 'axios'
-import type { Profile, Match, Job, DiscoverStats, MatchMode } from './types'
+import type { Profile, Match, Job, JobDetail, DiscoverStats, MatchMode } from './types'
 import { supabase } from './supabase'
 
-export type { Profile, Match, Job, DiscoverStats, MatchMode }
+export type { Profile, Match, Job, JobDetail, DiscoverStats, MatchMode }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -33,6 +33,11 @@ api.interceptors.request.use(async (config) => {
 
 // Jobs API
 export const jobsApi = {
+  getJobDetail: async (jobUuid: string) => {
+    const response = await api.get(`/api/jobs/${jobUuid}`)
+    return response.data as JobDetail
+  },
+
   getInterested: async () => {
     const response = await api.get('/api/jobs/interested')
     return response.data as { jobs: import('./types').Match[] }
@@ -42,6 +47,7 @@ export const jobsApi = {
     const response = await api.post(`/api/jobs/${jobUuid}/interact`, null, {
       params: { interaction_type: interactionType },
     })
+    await revalidateMatches()
     return response.data
   },
 }
@@ -55,6 +61,7 @@ export const profileApi = {
 
   processResume: async () => {
     const response = await api.post('/api/profile/process-resume')
+    await revalidateMatches()
     return response.data
   },
 
@@ -81,11 +88,14 @@ export const profileApi = {
         response: { status: res.status, data: errBody },
       })
     }
-    return res.json()
+    const result = await res.json()
+    await revalidateMatches()
+    return result
   },
 
   computeTaste: async () => {
     const response = await api.post('/api/profile/compute-taste')
+    await revalidateMatches()
     return response.data as { ok: boolean; interested: number; not_interested: number; rated_count: number }
   },
 
@@ -95,7 +105,8 @@ export const profileApi = {
   },
 }
 
-// Matches API
+// Matches API — uses Next.js /api/matches route with 15min cache (user_id + mode).
+// Cache invalidated on resume update or job rating via revalidateMatches().
 export const matchesApi = {
   get: async (
     mode: MatchMode = 'resume',
@@ -115,20 +126,42 @@ export const matchesApi = {
     })
     if (excludeRatedOnly) params.append('exclude_rated_only', 'true')
     if (minSimilarity !== undefined) params.append('min_similarity', minSimilarity.toString())
-    // Only pass max_days_old when explicitly set to a valid positive number (never filter by default)
     if (maxDaysOld != null && !Number.isNaN(maxDaysOld) && maxDaysOld > 0) {
       params.append('max_days_old', maxDaysOld.toString())
     }
     if (sessionId) params.append('session_id', sessionId)
-    const response = await api.get(`/api/matches?${params}`)
-    return response.data as {
+
+    const { data } = await supabase.auth.getSession()
+    const token = data.session?.access_token
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (token) headers['Authorization'] = `Bearer ${token}`
+
+    const res = await fetch(`/api/matches?${params}`, { headers })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw Object.assign(new Error(err.detail || err.error || res.statusText), {
+        response: { status: res.status, data: err },
+      })
+    }
+    return res.json() as Promise<{
       matches: Match[]
       total: number
       has_more: boolean
       mode: MatchMode
       session_id: string
-    }
+    }>
   },
+}
+
+/** Invalidate matches cache for current user. Call after resume update or job rating. */
+export async function revalidateMatches(): Promise<void> {
+  const { data } = await supabase.auth.getSession()
+  const token = data.session?.access_token
+  if (!token) return
+  await fetch('/api/revalidate-matches', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  }).catch(() => {}) // non-fatal
 }
 
 // Discover API
@@ -140,17 +173,20 @@ export const discoverApi = {
 }
 
 // Dashboard API
+// getSummary and getJobsOverTimePostedAndRemoved use Next.js cached routes (/api/dashboard/*)
+// for 1h stale-while-revalidate. Other endpoints hit FastAPI directly.
 export const dashboardApi = {
   getSummary: async () => {
-    const response = await api.get('/api/dashboard/summary')
-    return response.data as {
+    const res = await fetch('/api/dashboard/summary')
+    if (!res.ok) throw new Error('Failed to fetch dashboard summary')
+    return res.json() as Promise<{
       total_jobs: number
       active_jobs: number
       inactive_jobs: number
       by_source: Record<string, number>
       jobs_with_embeddings: number
       jobs_needing_backfill: number
-    }
+    }>
   },
   getSummaryPublic: async () => {
     const response = await api.get('/api/dashboard/summary-public')
@@ -164,14 +200,15 @@ export const dashboardApi = {
     }
   },
   getJobsOverTimePostedAndRemoved: async (limitDays = 90) => {
-    const response = await api.get('/api/dashboard/jobs-over-time-posted-and-removed', {
-      params: { limit_days: limitDays },
-    })
-    return response.data as Array<{
+    const res = await fetch(
+      `/api/dashboard/jobs-over-time-posted-and-removed?limit_days=${limitDays}`
+    )
+    if (!res.ok) throw new Error('Failed to fetch jobs over time')
+    return res.json() as Promise<Array<{
       date: string
       added_count: number
       removed_count: number
-    }>
+    }>>
   },
   getActiveJobsOverTime: async (limitDays = 90) => {
     const response = await api.get('/api/dashboard/active-jobs-over-time', {
@@ -237,5 +274,31 @@ export const dashboardApi = {
   getSalaryDistribution: async () => {
     const response = await api.get('/api/dashboard/salary-distribution')
     return response.data as Array<{ bucket: string; count: number }>
+  },
+}
+
+/** Supabase RPC API — use when DB is Supabase Postgres (migration 006).
+ * Bypasses FastAPI. See docs/SUPABASE_RPC.md */
+export const supabaseRpcApi = {
+  getDashboardSummary: async () => {
+    const { data, error } = await supabase.rpc('get_dashboard_summary')
+    if (error) throw error
+    return data as {
+      total_jobs: number
+      active_jobs: number
+      inactive_jobs: number
+      by_source: Record<string, number>
+      jobs_with_embeddings: number
+      jobs_needing_backfill: number
+    }
+  },
+
+  getActiveJobsForMatching: async (userId: string, limit = 5000) => {
+    const { data, error } = await supabase.rpc('get_active_jobs_for_matching', {
+      p_user_id: userId,
+      p_limit: limit,
+    })
+    if (error) throw error
+    return (data ?? []).map((r: { job_uuid: string }) => r.job_uuid)
   },
 }

@@ -17,7 +17,7 @@ import {
 } from 'recharts'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/design'
-import { BarChart2, TrendingUp } from 'lucide-react'
+import { TrendingUp } from 'lucide-react'
 
 const CHART_MARGIN_DEFAULT = { top: 8, right: 8, left: 0, bottom: 0 }
 const CHART_MARGIN_VERTICAL_LARGE = { left: 120, right: 24 }
@@ -35,10 +35,18 @@ const CHART_COLORS = [
   'rgb(161, 98, 7)',
 ]
 
-type JobsPostedRemovedPoint = {
-  date: string
-  added_count: number
-  removed_count: number
+const EMPLOYMENT_TOP_N = 5
+
+function collapseEmploymentData(
+  data: Array<{ employment_type: string; count: number }>
+): Array<{ employment_type: string; count: number }> {
+  if (data.length <= EMPLOYMENT_TOP_N + 1) return data
+  const sorted = [...data].sort((a, b) => b.count - a.count)
+  const top = sorted.slice(0, EMPLOYMENT_TOP_N)
+  const rest = sorted.slice(EMPLOYMENT_TOP_N)
+  const otherCount = rest.reduce((sum, x) => sum + x.count, 0)
+  if (otherCount === 0) return top
+  return [...top, { employment_type: 'Other', count: otherCount }]
 }
 
 type CategoryStats = {
@@ -52,7 +60,7 @@ type CategoryStats = {
 }
 
 export interface DashboardChartsProps {
-  jobsPostedAndRemoved: JobsPostedRemovedPoint[]
+  hideJobsOverTimeHeader?: boolean
   activeJobsOverTime: Array<{ date: string; active_count: number }>
   jobsByCategory: Array<{ category: string; count: number }>
   employmentData: Array<{ employment_type: string; count: number }>
@@ -65,11 +73,10 @@ export interface DashboardChartsProps {
   limitDays: number
   onCategorySelect: (category: string | null) => void
   formatDate: (d: string) => string
-  getPostedRemovedDomainMax: () => number
 }
 
 export function DashboardCharts({
-  jobsPostedAndRemoved,
+  hideJobsOverTimeHeader = false,
   activeJobsOverTime,
   jobsByCategory,
   employmentData,
@@ -82,51 +89,16 @@ export function DashboardCharts({
   limitDays,
   onCategorySelect,
   formatDate,
-  getPostedRemovedDomainMax,
 }: DashboardChartsProps) {
   return (
     <>
       <section className="space-y-6">
-        <h2 className="text-lg font-semibold leading-tight text-slate-900 dark:text-slate-100">
-          Jobs over time
-        </h2>
+        {!hideJobsOverTimeHeader && (
+          <h2 className="text-lg font-semibold leading-tight text-slate-900 dark:text-slate-100">
+            Jobs over time
+          </h2>
+        )}
         <div className="space-y-6">
-          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-800">
-            <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-4">
-              Added vs removed
-            </h3>
-            <div className="h-[280px] w-full min-h-[200px] sm:h-[300px]">
-              {jobsPostedAndRemoved.length === 0 ? (
-                <EmptyState
-                  icon={BarChart2}
-                  message="No data for this period"
-                  description="Added and removed counts will appear once jobs are crawled."
-                  className="h-full py-8"
-                />
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                  data={jobsPostedAndRemoved}
-                  margin={CHART_MARGIN_DEFAULT}
-                  barCategoryGap={4}
-                  barGap={2}
-                  barSize={12}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgb(226, 232, 240)" />
-                  <XAxis dataKey="date" tickFormatter={formatDate} fontSize={11} />
-                  <YAxis fontSize={11} domain={[0, getPostedRemovedDomainMax()]} />
-                  <Tooltip
-                    formatter={(value: number) => [value.toLocaleString(), '']}
-                    labelFormatter={(label) => formatDate(label)}
-                  />
-                  <Legend />
-                  <Bar dataKey="added_count" name="Added" fill="rgb(16, 185, 129)" radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="removed_count" name="Removed" fill="rgb(239, 68, 68)" radius={[2, 2, 0, 0]} />
-                </BarChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-          </div>
           <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-800">
             <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-4">
               Total active jobs
@@ -336,7 +308,7 @@ export function DashboardCharts({
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={employmentData}
+                      data={collapseEmploymentData(employmentData)}
                       dataKey="count"
                       nameKey="employment_type"
                       cx="50%"
@@ -345,10 +317,10 @@ export function DashboardCharts({
                       outerRadius={100}
                       paddingAngle={2}
                       label={({ employment_type, percent }) =>
-                        percent ? `${employment_type} ${(percent * 100).toFixed(0)}%` : employment_type
+                        percent ? `${employment_type} ${(percent * 100).toFixed(0)}%` : null
                       }
                     >
-                      {employmentData.map((_, i) => (
+                      {collapseEmploymentData(employmentData).map((_, i) => (
                         <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                       ))}
                     </Pie>
@@ -392,12 +364,18 @@ export function DashboardCharts({
           <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-800">
             <div className="h-[260px] w-full min-h-[200px] sm:h-[280px]">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={salaryData} margin={CHART_MARGIN_SALARY}>
+                <BarChart data={salaryData} margin={{ ...CHART_MARGIN_SALARY, bottom: 8 }} barCategoryGap={4} barGap={2}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgb(226, 232, 240)" />
-                  <XAxis dataKey="bucket" fontSize={11} />
+                  <XAxis dataKey="bucket" fontSize={10} tick={{ fontSize: 10 }} interval={0} />
                   <YAxis fontSize={11} />
-                  <Tooltip formatter={(value: number) => [value.toLocaleString(), 'Jobs']} />
-                  <Bar dataKey="count" name="Jobs" fill={CHART_COLORS[2]} radius={[4, 4, 0, 0]} barSize={32} />
+                  <Tooltip
+                    formatter={(value: number) => {
+                      const total = salaryData.reduce((s, d) => s + d.count, 0)
+                      const pct = total > 0 ? ((value / total) * 100).toFixed(1) : '0'
+                      return [`${value.toLocaleString()} jobs (${pct}%)`, 'Jobs']
+                    }}
+                  />
+                  <Bar dataKey="count" name="Jobs" fill={CHART_COLORS[2]} radius={[4, 4, 0, 0]} barSize={24} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

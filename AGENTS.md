@@ -67,6 +67,8 @@ Requires `DATABASE_URL` (Postgres). Output is markdown with tables, columns, typ
 
 | Issue | Details |
 |-------|---------|
+| **Matches cache** | Next.js uses `unstable_cache` (15 min TTL). Invalidate via `POST /api/revalidate-matches` after resume/rating. Alternative: `ENABLE_MATCHES_CACHE=1` on FastAPI when bypassing Next.js. See [docs/MATCHES_CACHE.md](docs/MATCHES_CACHE.md). |
+| **Active jobs pool cache** | `ENABLE_ACTIVE_JOBS_POOL_CACHE=1` caches (job_uuid, embedding, last_seen_at) for 15 min. Invalidate via `POST /api/admin/invalidate-pool` after crawl. See [docs/ACTIVE_JOBS_POOL_CACHE.md](docs/ACTIVE_JOBS_POOL_CACHE.md). |
 | **Vector pool size** | `get_active_job_ids_ranked(limit=20000)` — 20k pool balances load-more coverage vs query performance. Too large → timeout. |
 | **DuckDB vs Postgres** | DuckDB has no vector search; does full scan. Postgres uses pgvector when `scripts/migrations/001_add_pgvector.sql` is applied. |
 | **Storage selection** | `_make_store()` in server.py: `DATABASE_URL` → PostgresStore, else DuckDBStore. |
@@ -82,4 +84,5 @@ Requires `DATABASE_URL` (Postgres). Output is markdown with tables, columns, typ
 - [IMPROVEMENTS_SUMMARY.md](IMPROVEMENTS_SUMMARY.md) — historical changelog
 - [scripts/BACKFILL_README.md](scripts/BACKFILL_README.md) — backfill rich job fields
 - [scripts/LOCAL_CRAWL_WORKFLOW.md](scripts/LOCAL_CRAWL_WORKFLOW.md) — local crawl + export
+- [docs/ACTIVE_JOBS_POOL_CACHE.md](docs/ACTIVE_JOBS_POOL_CACHE.md) — active jobs pool cache
 - [DEPLOYMENT.md](DEPLOYMENT.md) — deploy checklist

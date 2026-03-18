@@ -3,21 +3,35 @@
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Query, UploadFile, File
+from fastapi import Depends, FastAPI, HTTPException, Query, UploadFile, File, Header
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from mcf.api.auth import get_current_user
 from mcf.api.config import settings
+from mcf.api.active_jobs_pool_cache import invalidate as invalidate_active_jobs_pool
+from mcf.api.matches_cache import get_cached, invalidate_user, invalidate_all, set_cached, cache_stats as matches_cache_stats
+from mcf.api.response_cache import (
+    TTL_DASHBOARD,
+    TTL_JOB_DETAIL,
+    TTL_MATCHES,
+    cache_invalidate,
+    cache_response,
+    cache_stats as response_cache_stats,
+    cache_list_keys,
+    invalidate_matches_for_user,
+)
 from mcf.api.services.matching_service import MatchingService
 from mcf.lib.embeddings.base import EmbedderProtocol
 from mcf.lib.embeddings.embedder import Embedder, EmbedderConfig
+from mcf.lib.embeddings.embeddings_cache import EmbeddingsCache
 from mcf.lib.embeddings.resume import extract_resume_text, preprocess_resume_text
 from mcf.lib.storage.base import Storage
 
@@ -38,6 +52,31 @@ def _make_store() -> Storage:
 
 # Global store — initialised in lifespan
 _store: Storage | None = None
+
+
+def _verify_admin_or_secret(
+    authorization: str | None = Header(default=None),
+    x_crawl_secret: str | None = Header(default=None, alias="X-Crawl-Secret"),
+) -> str:
+    """Allow access if X-Crawl-Secret matches OR JWT user is admin."""
+    expected_secret = os.getenv("CRON_SECRET") or os.getenv("REVALIDATE_SECRET")
+    if expected_secret and x_crawl_secret == expected_secret:
+        return "crawl"
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization[7:].strip()
+        from mcf.api.auth import get_current_user
+        try:
+            user_id = get_current_user(authorization=authorization)
+        except HTTPException:
+            raise
+        store = _store
+        if store and settings.admin_user_ids_set and user_id in settings.admin_user_ids_set:
+            return user_id
+        if store:
+            user = store.get_user_by_id(user_id)
+            if user and user.get("role") == "admin":
+                return user_id
+    raise HTTPException(status_code=403, detail="Admin access required")
 
 
 @asynccontextmanager
@@ -127,7 +166,25 @@ def mark_interaction(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     store.record_interaction(user_id=user_id, job_uuid=job_uuid, interaction_type=interaction_type)
+    if settings.enable_matches_cache:
+        invalidate_user(user_id)
+    if settings.enable_response_cache:
+        invalidate_matches_for_user(user_id)
     return {"status": "ok", "job_uuid": job_uuid, "interaction_type": interaction_type}
+
+
+@app.get("/api/jobs/{job_uuid}")
+@cache_response(TTL_JOB_DETAIL, "job", key_builder=lambda job_uuid, **_: job_uuid)
+def get_job_detail(
+    job_uuid: str,
+    user_id: str = Depends(get_current_user),
+):
+    """Return full job details by UUID. Used for prefetching and job detail page."""
+    store = get_store()
+    job = store.get_job(job_uuid)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
 
 
 @app.get("/api/jobs/interested")
@@ -156,6 +213,7 @@ def get_discover_stats(user_id: str = Depends(get_current_user)):
 
 
 @app.get("/api/dashboard/summary")
+@cache_response(TTL_DASHBOARD, "dashboard:summary")
 def get_dashboard_summary(user_id: str = Depends(get_current_user)):
     """Return dashboard summary: total jobs, active, by source (MCF only), jobs with embeddings."""
     store = get_store()
@@ -163,6 +221,7 @@ def get_dashboard_summary(user_id: str = Depends(get_current_user)):
 
 
 @app.get("/api/dashboard/summary-public")
+@cache_response(TTL_DASHBOARD, "dashboard:summary-public")
 def get_dashboard_summary_public():
     """Public endpoint for summary stats (no auth). Used on login screen."""
     store = get_store()
@@ -170,6 +229,7 @@ def get_dashboard_summary_public():
 
 
 @app.get("/api/dashboard/jobs-over-time-posted-and-removed")
+@cache_response(TTL_DASHBOARD, "dashboard:jobs-over-time")
 def get_dashboard_jobs_over_time_posted_and_removed(
     limit_days: int = Query(default=90, ge=1, le=365),
     user_id: str = Depends(get_current_user),
@@ -179,7 +239,18 @@ def get_dashboard_jobs_over_time_posted_and_removed(
     return store.get_jobs_over_time_posted_and_removed(limit_days=limit_days)
 
 
+@app.get("/api/dashboard/jobs-over-time-posted-and-removed-public")
+@cache_response(TTL_DASHBOARD, "dashboard:jobs-over-time-public")
+def get_dashboard_jobs_over_time_posted_and_removed_public(
+    limit_days: int = Query(default=90, ge=1, le=365),
+):
+    """Public endpoint for added/removed counts (no auth). Used by Next.js cached routes."""
+    store = get_store()
+    return store.get_jobs_over_time_posted_and_removed(limit_days=limit_days)
+
+
 @app.get("/api/dashboard/active-jobs-over-time")
+@cache_response(TTL_DASHBOARD, "dashboard:active-jobs-over-time")
 def get_dashboard_active_jobs_over_time(
     limit_days: int = Query(default=90, ge=1, le=365),
     user_id: str = Depends(get_current_user),
@@ -190,6 +261,7 @@ def get_dashboard_active_jobs_over_time(
 
 
 @app.get("/api/dashboard/active-jobs-over-time-public")
+@cache_response(TTL_DASHBOARD, "dashboard:active-jobs-over-time-public")
 def get_dashboard_active_jobs_over_time_public(
     limit_days: int = Query(default=30, ge=1, le=90),
 ):
@@ -199,6 +271,7 @@ def get_dashboard_active_jobs_over_time_public(
 
 
 @app.get("/api/dashboard/jobs-by-category")
+@cache_response(TTL_DASHBOARD, "dashboard:jobs-by-category")
 def get_dashboard_jobs_by_category(
     limit_days: int = Query(default=90, ge=1, le=365),
     limit: int = Query(default=30, ge=1, le=50),
@@ -210,6 +283,7 @@ def get_dashboard_jobs_by_category(
 
 
 @app.get("/api/dashboard/jobs-by-category-public")
+@cache_response(TTL_DASHBOARD, "dashboard:jobs-by-category-public")
 def get_dashboard_jobs_by_category_public(
     limit_days: int = Query(default=30, ge=1, le=90),
     limit: int = Query(default=8, ge=1, le=20),
@@ -220,6 +294,7 @@ def get_dashboard_jobs_by_category_public(
 
 
 @app.get("/api/dashboard/category-trends")
+@cache_response(TTL_DASHBOARD, "dashboard:category-trends")
 def get_dashboard_category_trends(
     category: str = Query(..., min_length=1),
     limit_days: int = Query(default=90, ge=1, le=365),
@@ -231,6 +306,7 @@ def get_dashboard_category_trends(
 
 
 @app.get("/api/dashboard/category-stats")
+@cache_response(TTL_DASHBOARD, "dashboard:category-stats")
 def get_dashboard_category_stats(
     category: str = Query(..., min_length=1),
     user_id: str = Depends(get_current_user),
@@ -241,6 +317,7 @@ def get_dashboard_category_stats(
 
 
 @app.get("/api/dashboard/jobs-by-employment-type")
+@cache_response(TTL_DASHBOARD, "dashboard:jobs-by-employment-type")
 def get_dashboard_jobs_by_employment_type(
     limit_days: int = Query(default=90, ge=1, le=365),
     limit: int = Query(default=20, ge=1, le=50),
@@ -252,6 +329,7 @@ def get_dashboard_jobs_by_employment_type(
 
 
 @app.get("/api/dashboard/jobs-by-position-level")
+@cache_response(TTL_DASHBOARD, "dashboard:jobs-by-position-level")
 def get_dashboard_jobs_by_position_level(
     limit_days: int = Query(default=90, ge=1, le=365),
     limit: int = Query(default=20, ge=1, le=50),
@@ -263,6 +341,7 @@ def get_dashboard_jobs_by_position_level(
 
 
 @app.get("/api/dashboard/salary-distribution")
+@cache_response(TTL_DASHBOARD, "dashboard:salary-distribution")
 def get_dashboard_salary_distribution(user_id: str = Depends(get_current_user)):
     """Return salary distribution buckets (from jobs.salary_min)."""
     store = get_store()
@@ -393,14 +472,23 @@ def _process_resume_text(
         if storage_path:
             store.update_profile(profile_id=profile_id, resume_storage_path=storage_path)
 
-    embedder: EmbedderProtocol = Embedder(EmbedderConfig())
+    embeddings_cache = EmbeddingsCache(store=store) if settings.enable_embeddings_cache else None
+    embedder: EmbedderProtocol = Embedder(EmbedderConfig(), embeddings_cache=embeddings_cache)
     preprocessed = preprocess_resume_text(resume_text)
-    embedding = embedder.embed_resume(preprocessed)
+    try:
+        embedding = embedder.embed_resume(preprocessed)
+    except Exception as e:
+        logging.exception("embed_resume failed: %s", e)
+        raise
     store.upsert_candidate_embedding(
         profile_id=profile_id,
         model_name=embedder.model_name,
         embedding=embedding,
     )
+    if settings.enable_matches_cache:
+        invalidate_user(user_id)
+    if settings.enable_response_cache:
+        invalidate_matches_for_user(user_id)
     return {"status": "ok", "profile_id": profile_id, "message": "Resume processed successfully"}
 
 
@@ -467,10 +555,15 @@ def compute_taste(user_id: str = Depends(get_current_user)):
         raise HTTPException(
             status_code=400, detail=result.get("reason", "Failed to compute taste profile")
         )
+    if settings.enable_matches_cache:
+        invalidate_user(user_id)
+    if settings.enable_response_cache:
+        invalidate_matches_for_user(user_id)
     return result
 
 
 @app.get("/api/matches")
+@cache_response(TTL_MATCHES, "matches")
 def get_matches(
     exclude_interacted: bool = True,
     exclude_rated_only: bool = False,
@@ -488,6 +581,21 @@ def get_matches(
     *exclude_rated_only*: when True, only exclude interested/not_interested (for Discover).
     When False, exclude all interactions (viewed, dismissed, etc.).
     """
+    if settings.enable_matches_cache:
+        cached = get_cached(
+            user_id=user_id,
+            mode=mode,
+            exclude_interacted=exclude_interacted,
+            exclude_rated_only=exclude_rated_only,
+            top_k=top_k,
+            offset=offset,
+            min_similarity=min_similarity,
+            max_days_old=max_days_old,
+            session_id=session_id,
+        )
+        if cached is not None:
+            return cached
+
     store = get_store()
     if mode not in ("resume", "taste"):
         raise HTTPException(status_code=400, detail="mode must be 'resume' or 'taste'")
@@ -542,13 +650,121 @@ def get_matches(
         )
 
     has_more = offset + len(matches) < total
-    return {
+    result = {
         "matches": matches,
         "total": total,
         "has_more": has_more,
         "mode": mode,
         "session_id": new_session_id,
     }
+    if settings.enable_matches_cache:
+        set_cached(
+            user_id=user_id,
+            mode=mode,
+            exclude_interacted=exclude_interacted,
+            exclude_rated_only=exclude_rated_only,
+            top_k=top_k,
+            offset=offset,
+            min_similarity=min_similarity,
+            max_days_old=max_days_old,
+            session_id=session_id,
+            result=result,
+        )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Admin (cache invalidation, stats)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/admin/invalidate-pool")
+def admin_invalidate_pool(_: str = Depends(_verify_admin_or_secret)):
+    """Invalidate the active jobs pool cache. Call after crawl completes.
+
+    Auth: X-Crawl-Secret header or JWT with admin role / ADMIN_USER_IDS.
+    """
+    if settings.enable_active_jobs_pool_cache:
+        invalidate_active_jobs_pool()
+    return {"status": "ok"}
+
+
+@app.post("/api/admin/invalidate-cache")
+def admin_invalidate_cache(
+    _: str = Depends(_verify_admin_or_secret),
+    prefix: str | None = Query(default=None, description="Invalidate all keys with this prefix"),
+    key: str | None = Query(default=None, description="Invalidate exact key"),
+    user_id: str | None = Query(default=None, description="Invalidate all matches for user"),
+):
+    """Manually invalidate response cache entries.
+
+    Auth: X-Crawl-Secret header or JWT with admin role / ADMIN_USER_IDS.
+    """
+    removed = 0
+    if user_id:
+        removed = invalidate_matches_for_user(user_id)
+    elif key:
+        removed = cache_invalidate(key=key)
+    elif prefix:
+        removed = cache_invalidate(prefix=prefix)
+        if prefix == "matches:" and settings.enable_matches_cache:
+            removed += invalidate_all()
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide one of: prefix, key, or user_id",
+        )
+    return {"status": "ok", "removed": removed}
+
+
+@app.get("/api/admin/cache-stats")
+def admin_cache_stats(_: str = Depends(_verify_admin_or_secret)):
+    """Cache hit rates and key counts. Auth: X-Crawl-Secret or admin JWT."""
+    return {
+        "response_cache": response_cache_stats(),
+        "matches_cache": matches_cache_stats(),
+    }
+
+
+@app.get("/api/admin/cache-keys")
+def admin_cache_keys(
+    _: str = Depends(_verify_admin_or_secret),
+    prefix: str = Query(default="", description="Filter by prefix"),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    """List cache keys (for debugging). Auth: X-Crawl-Secret or admin JWT."""
+    return {"keys": cache_list_keys(prefix=prefix, limit=limit)}
+
+
+@app.delete("/api/admin/cache")
+def admin_clear_cache(
+    _: str = Depends(_verify_admin_or_secret),
+    key: str | None = Query(default=None),
+    prefix: str | None = Query(default=None),
+):
+    """Clear specific key or prefix. Auth: X-Crawl-Secret or admin JWT."""
+    if key:
+        removed = cache_invalidate(key=key)
+    elif prefix:
+        removed = cache_invalidate(prefix=prefix)
+        if prefix == "matches:" and settings.enable_matches_cache:
+            removed += invalidate_all()
+    else:
+        raise HTTPException(400, "Provide key or prefix")
+    return {"removed": removed}
+
+
+@app.get("/api/admin/cache-timestamp")
+def admin_cache_timestamp(_: str = Depends(_verify_admin_or_secret)):
+    """Last crawl/cache update timestamp from DB. Auth: X-Crawl-Secret or admin JWT."""
+    store = _store
+    if not store or not hasattr(store, "get_cache_metadata"):
+        return {"last_updated": None}
+    try:
+        row = store.get_cache_metadata("crawl_completed_at")
+        return {"last_updated": str(row["updated_at"]) if row else None}
+    except Exception:
+        return {"last_updated": None}
 
 
 # ---------------------------------------------------------------------------

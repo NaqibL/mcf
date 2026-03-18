@@ -1,8 +1,10 @@
 'use client'
 
 import * as React from 'react'
+import Link from 'next/link'
 import { Building2, MapPin, ExternalLink } from 'lucide-react'
 import type { Match } from '@/lib/types'
+import { prefetchJobDetail } from '@/lib/job-prefetch'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -53,6 +55,9 @@ function ScoreBadge({ score }: { score: number }) {
 
 export const MatchCard = React.memo(function MatchCard({ match, onInteraction, loading, mode }: MatchCardProps) {
   const daysAgo = getDaysAgo(match.last_seen_at)
+  const handleMouseEnter = React.useCallback(() => {
+    prefetchJobDetail(match.job_uuid)
+  }, [match.job_uuid])
 
   return (
     <div
@@ -66,22 +71,18 @@ export const MatchCard = React.memo(function MatchCard({ match, onInteraction, l
               ? 'ring-1 ring-amber-200/50 dark:ring-amber-800/50'
               : ''
         }`}
+      onMouseEnter={handleMouseEnter}
     >
       <div className="p-5">
         <div className="flex items-start justify-between gap-4 mb-4">
           <div className="flex-1 min-w-0">
-            {match.job_url ? (
-              <a
-                href={match.job_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xl font-semibold text-slate-900 hover:text-indigo-600 transition-colors line-clamp-2 dark:text-slate-100 dark:hover:text-indigo-400"
-              >
-                {match.title}
-              </a>
-            ) : (
-              <h3 className="text-xl font-semibold text-slate-900 line-clamp-2 dark:text-slate-100">{match.title}</h3>
-            )}
+            <Link
+              href={`/job/${match.job_uuid}`}
+              prefetch={true}
+              className="text-xl font-semibold text-slate-900 hover:text-indigo-600 transition-colors line-clamp-2 dark:text-slate-100 dark:hover:text-indigo-400 block"
+            >
+              {match.title}
+            </Link>
 
             <div className="flex flex-wrap items-center gap-2 mt-2 text-slate-500 text-sm dark:text-slate-400">
               {match.company_name && (

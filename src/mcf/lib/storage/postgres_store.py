@@ -297,7 +297,7 @@ class PostgresStore(Storage):
             cur.execute(
                 """
                 SELECT job_uuid, title, company_name, location, job_url,
-                       is_active, first_seen_at, last_seen_at
+                       is_active, first_seen_at, last_seen_at, skills_json
                 FROM jobs WHERE job_uuid = %s
                 """,
                 [job_uuid],
@@ -309,6 +309,7 @@ class PostgresStore(Storage):
             "job_uuid": row[0], "title": row[1], "company_name": row[2],
             "location": row[3], "job_url": row[4], "is_active": row[5],
             "first_seen_at": row[6], "last_seen_at": row[7],
+            "skills": json.loads(row[8]) if row[8] else [],
         }
 
     def get_active_job_count(self) -> int:
@@ -316,6 +317,50 @@ class PostgresStore(Storage):
             cur.execute("SELECT COUNT(*) FROM jobs WHERE is_active = TRUE")
             row = cur.fetchone()
         return row[0] if row else 0
+
+    # === Embeddings cache (content_hash -> embedding) ===
+
+    def get_embedding_by_content_hash(
+        self, *, content_hash: str, model_name: str, embed_type: str
+    ) -> list[float] | None:
+        """Return cached embedding by content hash, or None."""
+        try:
+            with self._cur() as cur:
+                cur.execute(
+                    """
+                    SELECT embedding_json FROM embeddings_cache
+                    WHERE content_hash = %s AND model_name = %s AND embed_type = %s
+                    """,
+                    [content_hash, model_name, embed_type],
+                )
+                row = cur.fetchone()
+        except psycopg2.ProgrammingError:
+            return None  # table may not exist
+        if not row:
+            return None
+        return json.loads(row[0])
+
+    def upsert_embedding_cache(
+        self, *, content_hash: str, model_name: str, embed_type: str, embedding: Sequence[float]
+    ) -> None:
+        """Store embedding in cache by content hash."""
+        emb_list = [float(x) for x in embedding]
+        emb_str = json.dumps(emb_list)
+        try:
+            with self._cur() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO embeddings_cache(content_hash, model_name, embed_type, embedding_json, dim, cached_at)
+                    VALUES (%s, %s, %s, %s, %s, NOW())
+                    ON CONFLICT (content_hash, model_name, embed_type) DO UPDATE SET
+                      embedding_json = EXCLUDED.embedding_json,
+                      dim = EXCLUDED.dim,
+                      cached_at = EXCLUDED.cached_at
+                    """,
+                    [content_hash, model_name, embed_type, emb_str, len(emb_list)],
+                )
+        except psycopg2.ProgrammingError:
+            pass  # table may not exist
 
     # === Job embeddings ===
 
@@ -431,6 +476,34 @@ class PostgresStore(Storage):
             }
             out.append((uuid, title or "", json.loads(emb_json), job_details))
         return out
+
+    def get_active_jobs_pool(
+        self,
+    ) -> list[tuple[str, list[float], datetime | None]]:
+        """Return (job_uuid, embedding, last_seen_at) for all active jobs with embeddings."""
+        emb_select, _ = self._job_embedding_schema()
+        with self._cur() as cur:
+            cur.execute(
+                f"""
+                SELECT j.job_uuid, {emb_select}, j.last_seen_at
+                  FROM jobs j
+                  JOIN job_embeddings e ON e.job_uuid = j.job_uuid
+                 WHERE j.is_active = TRUE
+                   AND (e.embedding_json IS NOT NULL OR e.embedding IS NOT NULL)
+                """,
+            )
+            rows = cur.fetchall()
+        result = []
+        for r in rows:
+            emb_raw = r[1]
+            if emb_raw is None:
+                continue
+            if isinstance(emb_raw, str):
+                emb = json.loads(emb_raw)
+            else:
+                emb = emb_raw
+            result.append((r[0], emb, r[2]))
+        return result
 
     def get_active_job_ids_ranked(
         self,
@@ -965,18 +1038,29 @@ class PostgresStore(Storage):
         cutoff = _utcnow().date() - timedelta(days=limit_days)
 
         with self._cur() as cur:
-            cur.execute(
-                """
-                SELECT stat_date::date AS day,
-                       SUM(added_count)::int AS added_count,
-                       SUM(removed_count)::int AS removed_count
-                FROM job_daily_stats
-                WHERE stat_date >= %s AND category != 'Unknown'
-                GROUP BY stat_date
-                ORDER BY stat_date ASC
-                """,
-                [cutoff],
-            )
+            try:
+                cur.execute(
+                    """
+                    SELECT stat_date::date AS day, added_count, removed_count
+                    FROM mv_dashboard_daily_stats
+                    WHERE stat_date >= %s
+                    ORDER BY stat_date ASC
+                    """,
+                    [cutoff],
+                )
+            except psycopg2.ProgrammingError:
+                cur.execute(
+                    """
+                    SELECT stat_date::date AS day,
+                           SUM(added_count)::int AS added_count,
+                           SUM(removed_count)::int AS removed_count
+                    FROM job_daily_stats
+                    WHERE stat_date >= %s AND category != 'Unknown'
+                    GROUP BY stat_date
+                    ORDER BY stat_date ASC
+                    """,
+                    [cutoff],
+                )
             rows = cur.fetchall()
 
         return [
@@ -990,16 +1074,27 @@ class PostgresStore(Storage):
         cutoff = _utcnow().date() - timedelta(days=limit_days)
 
         with self._cur() as cur:
-            cur.execute(
-                """
-                SELECT stat_date::date AS day, SUM(active_count)::int AS active_count
-                FROM job_daily_stats
-                WHERE stat_date >= %s AND category != 'Unknown'
-                GROUP BY stat_date
-                ORDER BY stat_date ASC
-                """,
-                [cutoff],
-            )
+            try:
+                cur.execute(
+                    """
+                    SELECT stat_date::date AS day, active_count
+                    FROM mv_dashboard_daily_stats
+                    WHERE stat_date >= %s
+                    ORDER BY stat_date ASC
+                    """,
+                    [cutoff],
+                )
+            except psycopg2.ProgrammingError:
+                cur.execute(
+                    """
+                    SELECT stat_date::date AS day, SUM(active_count)::int AS active_count
+                    FROM job_daily_stats
+                    WHERE stat_date >= %s AND category != 'Unknown'
+                    GROUP BY stat_date
+                    ORDER BY stat_date ASC
+                    """,
+                    [cutoff],
+                )
             rows = cur.fetchall()
 
         return [{"date": str(r[0]), "active_count": r[1]} for r in rows]
@@ -1120,6 +1215,49 @@ class PostgresStore(Storage):
                     [today, run_id],
                 )
 
+    def refresh_dashboard_materialized_views(self) -> None:
+        """Refresh mv_dashboard_daily_stats and mv_dashboard_category_trends.
+        Call after crawl completion. Requires migration 005."""
+        with self._cur() as cur:
+            cur.execute("SELECT refresh_dashboard_materialized_views()")
+
+    def get_cache_metadata(self, key: str) -> dict | None:
+        """Return {key, value_json, updated_at} or None. Requires migration 007."""
+        try:
+            with self._cur() as cur:
+                cur.execute(
+                    "SELECT key, value_json, updated_at FROM cache_metadata WHERE key = %s",
+                    [key],
+                )
+                row = cur.fetchone()
+        except psycopg2.ProgrammingError:
+            return None
+        if not row:
+            return None
+        val = row[1]
+        if isinstance(val, str):
+            val = json.loads(val) if val else None
+        return {
+            "key": row[0],
+            "value_json": val,
+            "updated_at": row[2],
+        }
+
+    def set_cache_metadata(self, key: str, value_json: dict) -> None:
+        """Upsert cache_metadata row. Requires migration 007."""
+        try:
+            with self._cur() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO cache_metadata (key, value_json, updated_at)
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (key) DO UPDATE SET value_json = EXCLUDED.value_json, updated_at = NOW()
+                    """,
+                    [key, json.dumps(value_json)],
+                )
+        except psycopg2.ProgrammingError:
+            pass
+
     def delete_inactive_job_embeddings(self) -> int:
         """Delete embeddings for inactive jobs that no user has ever interacted with."""
         with self._cur() as cur:
@@ -1173,17 +1311,32 @@ class PostgresStore(Storage):
                 cur.execute(
                     """
                     SELECT stat_date::date AS day,
-                           SUM(active_count)::int AS active_count,
-                           SUM(added_count)::int AS added_count,
-                           SUM(removed_count)::int AS removed_count
-                    FROM job_daily_stats
+                           active_count, added_count, removed_count
+                    FROM mv_dashboard_category_trends
                     WHERE category = %s AND stat_date >= %s
-                    GROUP BY stat_date
                     ORDER BY stat_date ASC
                     """,
                     [category, cutoff],
                 )
                 rows = cur.fetchall()
+            except psycopg2.ProgrammingError:
+                try:
+                    cur.execute(
+                        """
+                        SELECT stat_date::date AS day,
+                               SUM(active_count)::int AS active_count,
+                               SUM(added_count)::int AS added_count,
+                               SUM(removed_count)::int AS removed_count
+                        FROM job_daily_stats
+                        WHERE category = %s AND stat_date >= %s
+                        GROUP BY stat_date
+                        ORDER BY stat_date ASC
+                        """,
+                        [category, cutoff],
+                    )
+                    rows = cur.fetchall()
+                except Exception:
+                    rows = []
             except Exception:
                 rows = []
 
@@ -1229,7 +1382,10 @@ class PostgresStore(Storage):
             ) = %s
         """
         mcf = "AND (job_source = 'mcf' OR job_source IS NULL)"
-        bucket_order = ["$0-2k", "$2k-4k", "$4k-6k", "$6k-8k", "$8k+", "Not disclosed"]
+        bucket_order = [
+            "$0-1k", "$1k-2k", "$2k-3k", "$3k-4k", "$4k-5k",
+            "$5k-6k", "$6k-8k", "$8k-10k", "$10k+", "Not disclosed",
+        ]
 
         with self._cur() as cur:
             cur.execute(
@@ -1283,11 +1439,15 @@ class PostgresStore(Storage):
                 SELECT
                     CASE
                         WHEN salary_min IS NULL THEN 'Not disclosed'
-                        WHEN salary_min < 2000 THEN '$0-2k'
-                        WHEN salary_min < 4000 THEN '$2k-4k'
-                        WHEN salary_min < 6000 THEN '$4k-6k'
+                        WHEN salary_min < 1000 THEN '$0-1k'
+                        WHEN salary_min < 2000 THEN '$1k-2k'
+                        WHEN salary_min < 3000 THEN '$2k-3k'
+                        WHEN salary_min < 4000 THEN '$3k-4k'
+                        WHEN salary_min < 5000 THEN '$4k-5k'
+                        WHEN salary_min < 6000 THEN '$5k-6k'
                         WHEN salary_min < 8000 THEN '$6k-8k'
-                        ELSE '$8k+'
+                        WHEN salary_min < 10000 THEN '$8k-10k'
+                        ELSE '$10k+'
                     END AS bucket,
                     COUNT(*)::int AS count
                 FROM jobs
@@ -1368,22 +1528,29 @@ class PostgresStore(Storage):
         return [{"position_level": r[0], "count": r[1]} for r in rows]
 
     def get_salary_distribution(self) -> list[dict]:
-        bucket_order = ["$0-2k", "$2k-4k", "$4k-6k", "$6k-8k", "$8k+", "Not disclosed"]
+        bucket_order = [
+            "$0-1k", "$1k-2k", "$2k-3k", "$3k-4k", "$4k-5k",
+            "$5k-6k", "$6k-8k", "$8k-10k", "$10k+", "Not disclosed",
+        ]
         with self._cur() as cur:
             cur.execute(
                 """
                 SELECT
                     CASE
                         WHEN salary_min IS NULL THEN 'Not disclosed'
-                        WHEN salary_min < 2000 THEN '$0-2k'
-                        WHEN salary_min < 4000 THEN '$2k-4k'
-                        WHEN salary_min < 6000 THEN '$4k-6k'
+                        WHEN salary_min < 1000 THEN '$0-1k'
+                        WHEN salary_min < 2000 THEN '$1k-2k'
+                        WHEN salary_min < 3000 THEN '$2k-3k'
+                        WHEN salary_min < 4000 THEN '$3k-4k'
+                        WHEN salary_min < 5000 THEN '$4k-5k'
+                        WHEN salary_min < 6000 THEN '$5k-6k'
                         WHEN salary_min < 8000 THEN '$6k-8k'
-                        ELSE '$8k+'
+                        WHEN salary_min < 10000 THEN '$8k-10k'
+                        ELSE '$10k+'
                     END AS bucket,
                     COUNT(*)::int AS count
                 FROM jobs
-                WHERE is_active = TRUE
+                WHERE is_active = TRUE AND (job_source = 'mcf' OR job_source IS NULL)
                 GROUP BY 1
                 """
             )

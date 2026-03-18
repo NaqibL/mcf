@@ -2,17 +2,19 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import dynamic from 'next/dynamic'
+import type { Session } from '@supabase/supabase-js'
 import { profileApi } from '@/lib/api'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
-import type { Profile } from '@/lib/types'
 import AuthGate from './components/AuthGate'
+import { useProfileContext } from './components/ProfileProvider'
+import { RatingsQueueProvider } from './components/RatingsQueueProvider'
 import { Layout } from './components/layout'
 import NavUserActions from './components/NavUserActions'
-import { PageHeader, Card, CardBody, EmptyState, LoadingState } from '@/components/design'
+import { PageHeader, Card, CardBody, LoadingState } from '@/components/design'
 import { Button } from '@/components/ui/button'
 import { MatchesErrorBoundary } from './MatchesErrorBoundary'
 import Spinner from './components/Spinner'
-import { TutorialModal, getTutorialStep, hasSeenTutorial, setTutorialStep } from './components/TutorialModal'
+import { TutorialModal, getTutorialStep, hasSeenTutorial } from './components/TutorialModal'
 import { toast } from 'sonner'
 import { Upload, RefreshCw, FileWarning } from 'lucide-react'
 
@@ -41,7 +43,7 @@ function MatchesHeaderActions({
   onProcessResume,
   onStartTutorial,
 }: {
-  profile: Profile | null
+  profile: { profile?: unknown; resume_exists?: boolean } | null
   loadingProfile: boolean
   processingResume: boolean
   onUploadClick: () => void
@@ -100,45 +102,38 @@ function MatchesHeaderActions({
   )
 }
 
-function App() {
+function App({ session }: { session: Session | null }) {
+  const userId = session?.user?.id ?? (isSupabaseConfigured ? null : 'default')
+  const { profile, isLoading: loadingProfile, isValidating, invalidateProfile } = useProfileContext()
   const [tab, setTab] = useState<Tab>('resume')
-  const [profile, setProfile] = useState<Profile | null>(null)
-  const [loadingProfile, setLoadingProfile] = useState(true)
   const [processingResume, setProcessingResume] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const onUploadClick = useCallback(() => fileInputRef.current?.click?.(), [])
   const handleTabClick = useCallback((id: Tab) => setTab(id), [])
 
   useEffect(() => {
-    profileApi
-      .get()
-      .then(async (data) => {
-        setProfile(data)
-        if (data.resume_exists && !data.profile) {
-          setProcessingResume(true)
-          try {
-            await profileApi.processResume()
-            const updated = await profileApi.get()
-            setProfile(updated)
-            toast.success('Resume processed automatically!')
-          } catch (err: unknown) {
-            const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-            toast.error(detail || 'Auto-processing resume failed. Upload your resume to continue.')
-          } finally {
-            setProcessingResume(false)
-          }
-        }
-      })
-      .catch(() => toast.error('Could not connect to API'))
-      .finally(() => setLoadingProfile(false))
-  }, [])
+    if (!userId) return
+    if (profile && !isValidating && profile.resume_exists && !profile.profile) {
+      setProcessingResume(true)
+      profileApi
+        .processResume()
+        .then(() => {
+          invalidateProfile()
+        })
+        .then(() => toast.success('Resume processed automatically!'))
+        .catch((err: unknown) => {
+          const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+          toast.error(detail || 'Auto-processing resume failed. Upload your resume to continue.')
+        })
+        .finally(() => setProcessingResume(false))
+    }
+  }, [userId, profile?.resume_exists, profile?.profile, isValidating, invalidateProfile])
 
   const handleProcessResume = async () => {
     setProcessingResume(true)
     try {
       await profileApi.processResume()
-      const updated = await profileApi.get()
-      setProfile(updated)
+      invalidateProfile()
       toast.success('Resume processed!')
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -156,8 +151,7 @@ function App() {
     setProcessingResume(true)
     try {
       await profileApi.uploadResume(file)
-      const updated = await profileApi.get()
-      setProfile(updated)
+      invalidateProfile()
       toast.success('Resume uploaded and processed!')
     } catch (err: unknown) {
       const errObj = err as { response?: { status?: number; data?: { detail?: string } }; message?: string }
@@ -293,10 +287,12 @@ function App() {
           }
         />
 
-        <div className="mt-6">
-          {tab === 'resume' && <LazyResumeTab />}
-          {tab === 'taste' && <LazyTasteTab />}
-        </div>
+        <RatingsQueueProvider>
+          <div className="mt-6">
+            {tab === 'resume' && <LazyResumeTab />}
+            {tab === 'taste' && <LazyTasteTab />}
+          </div>
+        </RatingsQueueProvider>
       </MatchesErrorBoundary>
     </Layout>
   )
@@ -305,7 +301,7 @@ function App() {
 export default function Home() {
   return (
     <AuthGate>
-      {() => <App />}
+      {(session) => <App session={session} />}
     </AuthGate>
   )
 }

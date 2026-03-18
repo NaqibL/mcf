@@ -147,6 +147,13 @@ class Storage(ABC):
     @abstractmethod
     def get_embedding_model_name(self) -> str | None: ...
 
+    def get_active_jobs_pool(
+        self,
+    ) -> list[tuple[str, list[float], datetime | None]]:
+        """Return (job_uuid, embedding, last_seen_at) for all active jobs with embeddings.
+        Used by active_jobs_pool_cache for in-memory similarity computation."""
+        raise NotImplementedError
+
     @abstractmethod
     def get_active_job_ids_ranked(
         self,
@@ -314,6 +321,25 @@ class Storage(ABC):
         similarity_score: float,
         match_type: str,
     ) -> None: ...
+
+    # === Cache metadata ===
+
+    def get_cache_metadata(self, key: str) -> dict | None:
+        """Return {key, value_json, updated_at} or None. Postgres only."""
+        raise NotImplementedError
+
+    def set_cache_metadata(self, key: str, value_json: dict) -> None:
+        """Upsert cache_metadata row. Postgres only."""
+        raise NotImplementedError
+
+    def update_crawl_completed_timestamp(self) -> None:
+        """Update crawl_completed_at in cache_metadata. Postgres only."""
+        try:
+            from datetime import datetime, timezone
+
+            self.set_cache_metadata("crawl_completed_at", {"ts": datetime.now(timezone.utc).isoformat()})
+        except NotImplementedError:
+            pass
 
     # === Lifecycle ===
 

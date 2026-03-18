@@ -2,11 +2,48 @@
 
 from __future__ import annotations
 
+import os
+import urllib.request
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Sequence
 
+
+def _notify_crawl_complete() -> None:
+    """Call Next.js webhook to invalidate caches (dashboard, matches, pool, job)."""
+    import time
+
+    webhook_url = os.getenv("CRAWL_WEBHOOK_URL") or os.getenv("NEXT_PUBLIC_VERCEL_URL")
+    if not webhook_url:
+        return
+    if not webhook_url.startswith("http"):
+        webhook_url = f"https://{webhook_url}"
+    webhook_url = f"{webhook_url.rstrip('/')}/api/webhooks/crawl-complete"
+
+    secret = os.getenv("CRON_SECRET") or os.getenv("REVALIDATE_SECRET")
+    if not secret:
+        return
+
+    req = urllib.request.Request(
+        webhook_url,
+        method="POST",
+        headers={"X-Crawl-Secret": secret, "Content-Type": "application/json"},
+    )
+    last_err = None
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                if resp.status >= 400:
+                    print(f"Warning: crawl webhook returned {resp.status}")
+                return
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(2**attempt)
+    print(f"Warning: crawl webhook failed after 3 attempts: {last_err}")
+
 from mcf.lib.embeddings.base import EmbedderProtocol
 from mcf.lib.embeddings.embedder import Embedder, EmbedderConfig
+from mcf.lib.embeddings.embeddings_cache import EmbeddingsCache
 from mcf.lib.embeddings.job_text import build_job_text_from_normalized
 from mcf.lib.sources.base import NormalizedJob
 from mcf.lib.sources.mcf_source import MCFJobSource
@@ -72,7 +109,16 @@ def run_incremental_crawl(
             store.deactivate_jobs(run_id=run.run_id, job_uuids=removed)
 
         if added:
-            _embedder: EmbedderProtocol = embedder if embedder is not None else Embedder(EmbedderConfig())
+            _embeddings_cache = (
+                EmbeddingsCache(store=store)
+                if os.getenv("ENABLE_EMBEDDINGS_CACHE", "1") in ("1", "true", "yes")
+                else None
+            )
+            _embedder: EmbedderProtocol = (
+                embedder
+                if embedder is not None
+                else Embedder(EmbedderConfig(), embeddings_cache=_embeddings_cache)
+            )
             cfg = getattr(_embedder, "config", None)
             batch_size = cfg.batch_size if cfg and hasattr(cfg, "batch_size") else 32
 
@@ -131,6 +177,31 @@ def run_incremental_crawl(
             maintained=len(maintained),
             removed=len(removed),
         )
+
+        # Refresh dashboard materialized views (Postgres only)
+        if hasattr(store, "refresh_dashboard_materialized_views"):
+            try:
+                store.refresh_dashboard_materialized_views()
+            except Exception:
+                pass  # Non-fatal; dashboard may use fallback queries
+
+        # Invalidate active jobs pool cache when same process runs API + crawl
+        try:
+            from mcf.api.active_jobs_pool_cache import invalidate
+
+            invalidate()
+        except ImportError:
+            pass
+
+        # Notify Next.js + FastAPI to invalidate caches (webhook)
+        _notify_crawl_complete()
+
+        # Update DB cache timestamp (Postgres only)
+        if hasattr(store, "update_crawl_completed_timestamp"):
+            try:
+                store.update_crawl_completed_timestamp()
+            except Exception:
+                pass
 
         final_run = RunStats(
             run_id=run.run_id,

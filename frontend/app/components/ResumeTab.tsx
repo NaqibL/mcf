@@ -1,9 +1,12 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { jobsApi, matchesApi, profileApi, discoverApi } from '@/lib/api'
+import { matchesApi, profileApi } from '@/lib/api'
+import { prefetchJobDetailsTopN } from '@/lib/job-prefetch'
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue'
-import type { Match, DiscoverStats } from '@/lib/types'
+import { useProfileContext } from './ProfileProvider'
+import { useRatingsQueue } from './RatingsQueueProvider'
+import type { Match } from '@/lib/types'
 import { MatchCard } from './JobCard'
 import {
   Card,
@@ -25,9 +28,11 @@ interface Filters {
 }
 
 export default function ResumeTab() {
+  const { profile, invalidateProfile, optimisticUpdateStats } = useProfileContext()
+  const { queueRating } = useRatingsQueue()
+  const stats = profile?.stats ?? null
   const [jobs, setJobs] = useState<Match[]>([])
   const [hasMore, setHasMore] = useState(false)
-  const [stats, setStats] = useState<DiscoverStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [computing, setComputing] = useState(false)
@@ -56,15 +61,6 @@ export default function ResumeTab() {
     }
   }, [stats?.interested])
 
-  const loadStats = useCallback(async () => {
-    try {
-      const s = await discoverApi.getStats()
-      setStats(s)
-    } catch {
-      // non-fatal
-    }
-  }, [])
-
   const loadJobs = useCallback(
     async (append = false) => {
       if (append) {
@@ -90,6 +86,7 @@ export default function ResumeTab() {
           setSessionId(data.session_id)
           setSessionOffset(JOBS_PER_PAGE)
           setJobs(data.matches)
+          prefetchJobDetailsTopN(data.matches.map((m) => m.job_uuid), 10)
         } else {
           sessionRef.current = { ...sessionRef.current, sessionOffset: off + JOBS_PER_PAGE }
           setSessionOffset((prev) => prev + JOBS_PER_PAGE)
@@ -108,38 +105,20 @@ export default function ResumeTab() {
 
   useEffect(() => {
     loadJobs()
-    loadStats()
-  }, [loadJobs, loadStats])
+  }, [loadJobs])
 
-  const rate = useCallback(async (uuid: string, interactionType: string) => {
+  const rate = useCallback((uuid: string, interactionType: string) => {
     const type = interactionType as 'interested' | 'not_interested'
     setRatingUuids((prev) => new Set(prev).add(uuid))
     setJobs((prev) => prev.filter((j) => j.job_uuid !== uuid))
-
-    try {
-      await jobsApi.markInteraction(uuid, type)
-      setStats((prev) =>
-        prev
-          ? {
-              ...prev,
-              [type]: prev[type] + 1,
-              total_rated: prev.total_rated + 1,
-              unrated: Math.max(0, prev.unrated - 1),
-            }
-          : prev,
-      )
-    } catch {
-      toast.error('Failed to save rating')
-      loadJobs()
-      loadStats()
-    } finally {
-      setRatingUuids((prev) => {
-        const next = new Set(prev)
-        next.delete(uuid)
-        return next
-      })
-    }
-  }, [loadJobs, loadStats])
+    optimisticUpdateStats(type)
+    queueRating(uuid, type)
+    setRatingUuids((prev) => {
+      const next = new Set(prev)
+      next.delete(uuid)
+      return next
+    })
+  }, [optimisticUpdateStats, queueRating])
 
   const handleComputeTaste = async () => {
     setComputing(true)
@@ -165,8 +144,8 @@ export default function ResumeTab() {
         `Reset complete: ${result.interactions_deleted} ratings, taste profile cleared.`,
         { duration: 4000 },
       )
+      invalidateProfile()
       loadJobs()
-      loadStats()
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       toast.error(detail || 'Reset failed')

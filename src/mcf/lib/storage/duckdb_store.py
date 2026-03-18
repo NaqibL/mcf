@@ -196,6 +196,21 @@ class DuckDBStore(Storage):
         self._con.execute("CREATE INDEX IF NOT EXISTS idx_matches_profile ON matches(profile_id)")
         self._con.execute("CREATE INDEX IF NOT EXISTS idx_matches_job ON matches(job_uuid)")
 
+        # Embeddings cache: content_hash -> embedding (avoids re-computing BGE)
+        self._con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS embeddings_cache (
+              content_hash TEXT,
+              model_name TEXT,
+              embed_type TEXT,
+              embedding_json TEXT,
+              dim INTEGER,
+              cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (content_hash, model_name, embed_type)
+            )
+            """
+        )
+
         self._con.execute(
             """
             CREATE TABLE IF NOT EXISTS job_daily_stats (
@@ -425,6 +440,41 @@ class DuckDBStore(Storage):
         rows = self._con.execute(sql).fetchall()
         return [r[0] for r in rows]
 
+    def get_embedding_by_content_hash(
+        self, *, content_hash: str, model_name: str, embed_type: str
+    ) -> list[float] | None:
+        """Return cached embedding by content hash, or None."""
+        try:
+            row = self._con.execute(
+                """
+                SELECT embedding_json FROM embeddings_cache
+                WHERE content_hash = ? AND model_name = ? AND embed_type = ?
+                """,
+                [content_hash, model_name, embed_type],
+            ).fetchone()
+        except Exception:
+            return None
+        if not row:
+            return None
+        return json.loads(row[0])
+
+    def upsert_embedding_cache(
+        self, *, content_hash: str, model_name: str, embed_type: str, embedding: Sequence[float]
+    ) -> None:
+        """Store embedding in cache by content hash."""
+        emb_list = [float(x) for x in embedding]
+        self._con.execute(
+            """
+            INSERT INTO embeddings_cache(content_hash, model_name, embed_type, embedding_json, dim, cached_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT (content_hash, model_name, embed_type) DO UPDATE SET
+              embedding_json = excluded.embedding_json,
+              dim = excluded.dim,
+              cached_at = excluded.cached_at
+            """,
+            [content_hash, model_name, embed_type, json.dumps(emb_list), len(emb_list)],
+        )
+
     def upsert_embedding(self, *, job_uuid: str, model_name: str, embedding: Sequence[float]) -> None:
         now = _utcnow()
         emb_list = [float(x) for x in embedding]
@@ -476,6 +526,23 @@ class DuckDBStore(Storage):
             }
             out.append((uuid, title or "", json.loads(emb_json), job_details))
         return out
+
+    def get_active_jobs_pool(
+        self,
+    ) -> list[tuple[str, list[float], datetime | None]]:
+        """Return (job_uuid, embedding, last_seen_at) for all active jobs with embeddings."""
+        rows = self._con.execute(
+            """
+            SELECT j.job_uuid, e.embedding_json, j.last_seen_at
+              FROM jobs j
+              JOIN job_embeddings e ON e.job_uuid = j.job_uuid
+             WHERE j.is_active = TRUE
+            """
+        ).fetchall()
+        return [
+            (r[0], json.loads(r[1]), r[2])
+            for r in rows
+        ]
 
     def get_active_job_ids_ranked(
         self,
@@ -794,7 +861,7 @@ class DuckDBStore(Storage):
         """Get job by UUID."""
         row = self._con.execute(
             """
-            SELECT job_uuid, title, company_name, location, job_url, is_active, first_seen_at, last_seen_at
+            SELECT job_uuid, title, company_name, location, job_url, is_active, first_seen_at, last_seen_at, skills_json
             FROM jobs WHERE job_uuid = ?
             """,
             [job_uuid],
@@ -810,6 +877,7 @@ class DuckDBStore(Storage):
             "is_active": row[5],
             "first_seen_at": row[6],
             "last_seen_at": row[7],
+            "skills": json.loads(row[8]) if row[8] else [],
         }
 
     def get_recent_runs(self, limit: int = 10) -> list[dict]:
@@ -1309,7 +1377,10 @@ class DuckDBStore(Storage):
             ) = ?
         """
         mcf = "AND (job_source = 'mcf' OR job_source IS NULL)"
-        bucket_order = ["$0-2k", "$2k-4k", "$4k-6k", "$6k-8k", "$8k+", "Not disclosed"]
+        bucket_order = [
+            "$0-1k", "$1k-2k", "$2k-3k", "$3k-4k", "$4k-5k",
+            "$5k-6k", "$6k-8k", "$8k-10k", "$10k+", "Not disclosed",
+        ]
 
         try:
             row = self._con.execute(
@@ -1363,11 +1434,15 @@ class DuckDBStore(Storage):
                 SELECT
                     CASE
                         WHEN salary_min IS NULL THEN 'Not disclosed'
-                        WHEN salary_min < 2000 THEN '$0-2k'
-                        WHEN salary_min < 4000 THEN '$2k-4k'
-                        WHEN salary_min < 6000 THEN '$4k-6k'
+                        WHEN salary_min < 1000 THEN '$0-1k'
+                        WHEN salary_min < 2000 THEN '$1k-2k'
+                        WHEN salary_min < 3000 THEN '$2k-3k'
+                        WHEN salary_min < 4000 THEN '$3k-4k'
+                        WHEN salary_min < 5000 THEN '$4k-5k'
+                        WHEN salary_min < 6000 THEN '$5k-6k'
                         WHEN salary_min < 8000 THEN '$6k-8k'
-                        ELSE '$8k+'
+                        WHEN salary_min < 10000 THEN '$8k-10k'
+                        ELSE '$10k+'
                     END AS bucket,
                     COUNT(*)::INTEGER AS count
                 FROM jobs
@@ -1460,22 +1535,29 @@ class DuckDBStore(Storage):
         return [{"position_level": r[0], "count": r[1]} for r in rows]
 
     def get_salary_distribution(self) -> list[dict]:
-        bucket_order = ["$0-2k", "$2k-4k", "$4k-6k", "$6k-8k", "$8k+", "Not disclosed"]
+        bucket_order = [
+            "$0-1k", "$1k-2k", "$2k-3k", "$3k-4k", "$4k-5k",
+            "$5k-6k", "$6k-8k", "$8k-10k", "$10k+", "Not disclosed",
+        ]
         try:
             rows = self._con.execute(
                 """
                 SELECT
                     CASE
                         WHEN salary_min IS NULL THEN 'Not disclosed'
-                        WHEN salary_min < 2000 THEN '$0-2k'
-                        WHEN salary_min < 4000 THEN '$2k-4k'
-                        WHEN salary_min < 6000 THEN '$4k-6k'
+                        WHEN salary_min < 1000 THEN '$0-1k'
+                        WHEN salary_min < 2000 THEN '$1k-2k'
+                        WHEN salary_min < 3000 THEN '$2k-3k'
+                        WHEN salary_min < 4000 THEN '$3k-4k'
+                        WHEN salary_min < 5000 THEN '$4k-5k'
+                        WHEN salary_min < 6000 THEN '$5k-6k'
                         WHEN salary_min < 8000 THEN '$6k-8k'
-                        ELSE '$8k+'
+                        WHEN salary_min < 10000 THEN '$8k-10k'
+                        ELSE '$10k+'
                     END AS bucket,
                     COUNT(*)::INTEGER AS count
                 FROM jobs
-                WHERE is_active = TRUE
+                WHERE is_active = TRUE AND (job_source = 'mcf' OR job_source IS NULL)
                 GROUP BY 1
                 """
             ).fetchall()

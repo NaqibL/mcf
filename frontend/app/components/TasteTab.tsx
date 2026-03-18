@@ -1,8 +1,11 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { jobsApi, matchesApi, profileApi, discoverApi } from '@/lib/api'
-import type { Match, DiscoverStats } from '@/lib/types'
+import { useState, useCallback, useRef } from 'react'
+import { matchesApi, profileApi } from '@/lib/api'
+import { prefetchJobDetailsTopN } from '@/lib/job-prefetch'
+import { useProfileContext } from './ProfileProvider'
+import { useRatingsQueue } from './RatingsQueueProvider'
+import type { Match } from '@/lib/types'
 import { MatchCard } from './JobCard'
 import {
   Card,
@@ -22,27 +25,16 @@ interface Filters {
 }
 
 export default function TasteTab() {
+  const { profile, invalidateProfile, optimisticUpdateStats } = useProfileContext()
+  const { queueRating } = useRatingsQueue()
+  const stats = profile?.stats ?? null
   const [matches, setMatches] = useState<Match[]>([])
-  const [stats, setStats] = useState<DiscoverStats | null>(null)
   const [filters, setFilters] = useState<Filters>({ topK: 25, minSimilarity: 0, maxDaysOld: null })
   const [finding, setFinding] = useState(false)
   const [loadingUuids, setLoadingUuids] = useState<Set<string>>(new Set())
   const [computing, setComputing] = useState(false)
   const matchesRef = useRef<Match[]>([])
   matchesRef.current = matches
-
-  const loadStats = useCallback(async () => {
-    try {
-      const s = await discoverApi.getStats()
-      setStats(s)
-    } catch {
-      // non-fatal
-    }
-  }, [])
-
-  useEffect(() => {
-    loadStats()
-  }, [loadStats])
 
   const findMatches = async () => {
     setFinding(true)
@@ -56,6 +48,7 @@ export default function TasteTab() {
         filters.maxDaysOld ?? undefined,
       )
       setMatches(data.matches)
+      prefetchJobDetailsTopN(data.matches.map((m) => m.job_uuid), 10)
       if (data.matches.length === 0) {
         toast.info('No matches found. Try lowering the minimum score filter.')
       } else {
@@ -77,7 +70,7 @@ export default function TasteTab() {
         `Taste profile updated from ${result.interested} interested jobs!`,
         { duration: 4000 },
       )
-      loadStats()
+      invalidateProfile()
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       toast.error(detail || 'Failed to update taste profile')
@@ -86,27 +79,21 @@ export default function TasteTab() {
     }
   }
 
-  const handleInteraction = useCallback(async (uuid: string, type: string) => {
-    const prev = [...matchesRef.current]
+  const handleInteraction = useCallback((uuid: string, type: string) => {
     setMatches((m) => m.filter((j) => j.job_uuid !== uuid))
     setLoadingUuids((s) => new Set(s).add(uuid))
-    try {
-      await jobsApi.markInteraction(uuid, type)
-      const label = type === 'interested' ? 'Interested ✓' : type === 'not_interested' ? 'Not Interested' : type
-      toast.success(label, { duration: 1500 })
-      loadStats()
-    } catch (err: unknown) {
-      setMatches(prev)
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      toast.error(`Failed: ${detail || 'Unknown error'}`)
-    } finally {
-      setLoadingUuids((s) => {
-        const next = new Set(s)
-        next.delete(uuid)
-        return next
-      })
+    if (type === 'interested' || type === 'not_interested') {
+      optimisticUpdateStats(type)
+      queueRating(uuid, type)
     }
-  }, [loadStats])
+    const label = type === 'interested' ? 'Interested ✓' : type === 'not_interested' ? 'Not Interested' : type
+    toast.success(label, { duration: 1500 })
+    setLoadingUuids((s) => {
+      const next = new Set(s)
+      next.delete(uuid)
+      return next
+    })
+  }, [optimisticUpdateStats, queueRating])
 
   const interested = stats?.interested ?? 0
   const hasEnoughRatings = interested >= 3

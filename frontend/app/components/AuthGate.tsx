@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { AuthErrorBoundary } from './AuthErrorBoundary'
 import { AuthDashboardPreview } from './AuthDashboardPreview'
+import { ProfileProvider } from './ProfileProvider'
 import { Database } from 'lucide-react'
 
 const LazyAuthDashboardPreview = dynamic(
@@ -137,7 +138,12 @@ export default function AuthGate({ children }: Props) {
 
   // Auth disabled (local dev) or already signed in
   if (!isSupabaseConfigured || session) {
-    return <>{children(session)}</>
+    const userId = session?.user?.id ?? (isSupabaseConfigured ? null : 'default')
+    return (
+      <ProfileProvider userId={userId}>
+        {children(session)}
+      </ProfileProvider>
+    )
   }
 
   return (

@@ -1,5 +1,6 @@
 """MCF CLI - Command line interface for MyCareersFuture job crawler."""
 
+import os
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -19,6 +20,7 @@ from mcf.api.services.matching_service import MatchingService
 from mcf.lib.api.client import MCFAPIError
 from mcf.lib.crawler.crawler import CrawlProgress
 from mcf.lib.embeddings.embedder import Embedder, EmbedderConfig
+from mcf.lib.embeddings.embeddings_cache import EmbeddingsCache
 from mcf.lib.embeddings.resume import extract_resume_text, preprocess_resume_text
 from mcf.lib.pipeline.incremental_crawl import run_incremental_crawl
 from mcf.lib.sources.cag_source import CareersGovJobSource
@@ -635,7 +637,8 @@ def re_embed(
         console.print(f"  Batch size: [yellow]{batch_size}[/yellow]")
         console.print()
 
-        embedder = Embedder(EmbedderConfig())
+        embeddings_cache = EmbeddingsCache(store=store) if os.getenv("ENABLE_EMBEDDINGS_CACHE", "1") in ("1", "true", "yes") else None
+        embedder = Embedder(EmbedderConfig(), embeddings_cache=embeddings_cache)
 
         with Progress(
             SpinnerColumn(),

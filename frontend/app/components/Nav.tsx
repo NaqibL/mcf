@@ -14,6 +14,7 @@ const navLinks = [
   { href: '/', label: 'Resume Matching' },
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/how-it-works', label: 'How it works' },
+  { href: '/admin', label: 'Admin' },
 ]
 
 export default function Nav({ variant = 'full', rightSlot }: NavProps) {

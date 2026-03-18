@@ -9,6 +9,19 @@ export interface Job {
   interactions?: string[]
 }
 
+/** Full job details from GET /api/jobs/:uuid (for prefetch & detail page) */
+export interface JobDetail {
+  job_uuid: string
+  title: string
+  company_name: string | null
+  location: string | null
+  job_url: string | null
+  is_active?: boolean
+  first_seen_at?: string
+  last_seen_at?: string
+  skills?: string[]
+}
+
 export interface Match {
   job_uuid: string
   title: string
