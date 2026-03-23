@@ -263,7 +263,7 @@ def get_dashboard_active_jobs_over_time(
 @app.get("/api/dashboard/active-jobs-over-time-public")
 @cache_response(TTL_DASHBOARD, "dashboard:active-jobs-over-time-public")
 def get_dashboard_active_jobs_over_time_public(
-    limit_days: int = Query(default=30, ge=1, le=90),
+    limit_days: int = Query(default=30, ge=1, le=365),
 ):
     """Public endpoint for active jobs over time (no auth). Used on login screen."""
     store = get_store()
@@ -285,8 +285,8 @@ def get_dashboard_jobs_by_category(
 @app.get("/api/dashboard/jobs-by-category-public")
 @cache_response(TTL_DASHBOARD, "dashboard:jobs-by-category-public")
 def get_dashboard_jobs_by_category_public(
-    limit_days: int = Query(default=30, ge=1, le=90),
-    limit: int = Query(default=8, ge=1, le=20),
+    limit_days: int = Query(default=30, ge=1, le=365),
+    limit: int = Query(default=8, ge=1, le=50),
 ):
     """Public endpoint for jobs by category (no auth). Used on login screen."""
     store = get_store()
@@ -344,6 +344,36 @@ def get_dashboard_jobs_by_position_level(
 @cache_response(TTL_DASHBOARD, "dashboard:salary-distribution")
 def get_dashboard_salary_distribution(user_id: str = Depends(get_current_user)):
     """Return salary distribution buckets (from jobs.salary_min)."""
+    store = get_store()
+    return store.get_salary_distribution()
+
+
+@app.get("/api/dashboard/jobs-by-employment-type-public")
+@cache_response(TTL_DASHBOARD, "dashboard:jobs-by-employment-type-public")
+def get_dashboard_jobs_by_employment_type_public(
+    limit_days: int = Query(default=90, ge=1, le=365),
+    limit: int = Query(default=20, ge=1, le=50),
+):
+    """Public endpoint for jobs by employment type (no auth)."""
+    store = get_store()
+    return store.get_jobs_by_employment_type(limit_days=limit_days, limit=limit)
+
+
+@app.get("/api/dashboard/jobs-by-position-level-public")
+@cache_response(TTL_DASHBOARD, "dashboard:jobs-by-position-level-public")
+def get_dashboard_jobs_by_position_level_public(
+    limit_days: int = Query(default=90, ge=1, le=365),
+    limit: int = Query(default=20, ge=1, le=50),
+):
+    """Public endpoint for jobs by position level (no auth)."""
+    store = get_store()
+    return store.get_jobs_by_position_level(limit_days=limit_days, limit=limit)
+
+
+@app.get("/api/dashboard/salary-distribution-public")
+@cache_response(TTL_DASHBOARD, "dashboard:salary-distribution-public")
+def get_dashboard_salary_distribution_public():
+    """Public endpoint for salary distribution (no auth)."""
     store = get_store()
     return store.get_salary_distribution()
 

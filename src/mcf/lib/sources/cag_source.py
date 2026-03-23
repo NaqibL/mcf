@@ -5,6 +5,7 @@ Uses the Algolia search index to list job IDs and fetch full job details.
 
 from __future__ import annotations
 
+import os
 import re
 import time
 import urllib.parse
@@ -18,7 +19,7 @@ from mcf.lib.sources.base import NormalizedJob
 # API constants
 # ---------------------------------------------------------------------------
 
-_ALGOLIA_APP_ID = "3OW7D8B4IZ"
+_ALGOLIA_APP_ID = os.environ.get("CAG_ALGOLIA_APP_ID", "3OW7D8B4IZ")
 _ALGOLIA_INDEX = "job_index"
 _ALGOLIA_SEARCH_URL = (
     f"https://{_ALGOLIA_APP_ID.lower()}-dsn.algolia.net/1/indexes/{_ALGOLIA_INDEX}/query"
@@ -28,7 +29,7 @@ _ALGOLIA_OBJECT_URL = (
 )
 _ALGOLIA_HEADERS = {
     "x-algolia-application-id": _ALGOLIA_APP_ID,
-    "x-algolia-api-key": "32fa71d8b0bc06be1e6395bf8c430107",
+    "x-algolia-api-key": os.environ.get("CAG_ALGOLIA_API_KEY", "32fa71d8b0bc06be1e6395bf8c430107"),
     "Referer": "https://jobs.careers.gov.sg/",
     "Content-Type": "application/json",
 }

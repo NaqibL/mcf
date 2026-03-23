@@ -1,5 +1,7 @@
 # MCF Job Matcher — Architecture
 
+For onboarding and env details, see [HANDOVER.md](../HANDOVER.md), [TECH_STACK.md](TECH_STACK.md), and [RUNTIME_FLOWS.md](RUNTIME_FLOWS.md).
+
 ## High-Level Overview
 
 ```mermaid
@@ -52,7 +54,7 @@ flowchart TB
 
 1. **Crawl** (`incremental_crawl.py`): List job IDs from MCF/CAG → diff with DB → fetch detail for new jobs → embed job text → upsert to storage.
 2. **Storage**: Jobs and embeddings stored via `Storage` interface. `PostgresStore` or `DuckDBStore` chosen by `DATABASE_URL`.
-3. **Matching** (`matching_service.py`): Get profile embedding → `get_active_job_ids_ranked(limit=20000)` → score (similarity + recency) → filter (min_similarity, max_days_old, exclude interacted) → create match session.
+3. **Matching** (`matching_service.py`): Get profile embedding → `get_active_job_ids_ranked(limit=2000)` → score (semantic similarity + recency; skills weight is 0) → filter (min_similarity, max_days_old, exclude interacted) → create match session.
 4. **API** (`server.py`): Serves matches, profile, dashboard, interactions.
 5. **Frontend**: Next.js app with Discover (taste), Matches, Dashboard.
 

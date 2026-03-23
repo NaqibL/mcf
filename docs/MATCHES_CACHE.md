@@ -1,6 +1,6 @@
 # Matches API Caching Strategy
 
-The `/api/matches` endpoint performs expensive operations (vector similarity, hybrid scoring). Two caching approaches are available.
+The `/api/matches` endpoint performs expensive operations (vector similarity, semantic + recency scoring). Two caching approaches are available.
 
 ## Requirements
 

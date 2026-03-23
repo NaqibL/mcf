@@ -536,29 +536,33 @@ def mark_interaction(
             help="DuckDB file path (default: data/mcf.duckdb)",
         ),
     ] = None,
+    db_url: Annotated[
+        Optional[str],
+        typer.Option("--db-url", help="PostgreSQL connection URL (overrides --db)", envvar="DATABASE_URL"),
+    ] = None,
 ) -> None:
     """Mark a job as interacted with (viewed, dismissed, applied, etc.)."""
     if interaction_type not in ["viewed", "dismissed", "applied", "saved"]:
         console.print(f"[bold red]Error:[/bold red] Invalid interaction type: {interaction_type}")
         console.print("Valid types: viewed, dismissed, applied, saved")
         raise typer.Exit(1)
-    
-    db_path = db or Path("data/mcf.duckdb")
-    store = DuckDBStore(db_path)
-    
+
+    store, db_display = _open_store(db, db_url)
+
     try:
         # Verify job exists
         job = store.get_job(job_uuid)
         if not job:
             console.print(f"[bold red]Error:[/bold red] Job {job_uuid} not found")
             raise typer.Exit(1)
-        
+
         store.record_interaction(user_id=user_id, job_uuid=job_uuid, interaction_type=interaction_type)
-        
+
         console.print(f"[bold green]Interaction recorded[/bold green]")
         console.print(f"  Job: {job.get('title', job_uuid)}")
         console.print(f"  Type: {interaction_type}")
         console.print(f"  User: {user_id}")
+        console.print(f"  Storage: [green]{db_display}[/green]")
     finally:
         store.close()
 

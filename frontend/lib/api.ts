@@ -211,10 +211,9 @@ export const dashboardApi = {
     }>>
   },
   getActiveJobsOverTime: async (limitDays = 90) => {
-    const response = await api.get('/api/dashboard/active-jobs-over-time', {
-      params: { limit_days: limitDays },
-    })
-    return response.data as Array<{ date: string; active_count: number }>
+    const res = await fetch(`/api/dashboard/active-jobs-over-time?limit_days=${limitDays}`)
+    if (!res.ok) throw new Error('Failed to fetch active jobs over time')
+    return res.json() as Promise<Array<{ date: string; active_count: number }>>
   },
   getActiveJobsOverTimePublic: async (limitDays = 30) => {
     const response = await api.get('/api/dashboard/active-jobs-over-time-public', {
@@ -223,10 +222,9 @@ export const dashboardApi = {
     return response.data as Array<{ date: string; active_count: number }>
   },
   getJobsByCategory: async (limitDays = 90, limit = 30) => {
-    const response = await api.get('/api/dashboard/jobs-by-category', {
-      params: { limit_days: limitDays, limit },
-    })
-    return response.data as Array<{ category: string; count: number }>
+    const res = await fetch(`/api/dashboard/jobs-by-category?limit_days=${limitDays}&limit=${limit}`)
+    if (!res.ok) throw new Error('Failed to fetch jobs by category')
+    return res.json() as Promise<Array<{ category: string; count: number }>>
   },
   getJobsByCategoryPublic: async (limitDays = 30, limit = 8) => {
     const response = await api.get('/api/dashboard/jobs-by-category-public', {
@@ -260,20 +258,19 @@ export const dashboardApi = {
     }
   },
   getJobsByEmploymentType: async (limitDays = 90, limit = 20) => {
-    const response = await api.get('/api/dashboard/jobs-by-employment-type', {
-      params: { limit_days: limitDays, limit },
-    })
-    return response.data as Array<{ employment_type: string; count: number }>
+    const res = await fetch(`/api/dashboard/jobs-by-employment-type?limit_days=${limitDays}&limit=${limit}`)
+    if (!res.ok) throw new Error('Failed to fetch jobs by employment type')
+    return res.json() as Promise<Array<{ employment_type: string; count: number }>>
   },
   getJobsByPositionLevel: async (limitDays = 90, limit = 20) => {
-    const response = await api.get('/api/dashboard/jobs-by-position-level', {
-      params: { limit_days: limitDays, limit },
-    })
-    return response.data as Array<{ position_level: string; count: number }>
+    const res = await fetch(`/api/dashboard/jobs-by-position-level?limit_days=${limitDays}&limit=${limit}`)
+    if (!res.ok) throw new Error('Failed to fetch jobs by position level')
+    return res.json() as Promise<Array<{ position_level: string; count: number }>>
   },
   getSalaryDistribution: async () => {
-    const response = await api.get('/api/dashboard/salary-distribution')
-    return response.data as Array<{ bucket: string; count: number }>
+    const res = await fetch('/api/dashboard/salary-distribution')
+    if (!res.ok) throw new Error('Failed to fetch salary distribution')
+    return res.json() as Promise<Array<{ bucket: string; count: number }>>
   },
 }
 

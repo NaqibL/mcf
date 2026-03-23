@@ -1,6 +1,6 @@
 # MCF Improvements Summary
 
-> **Historical changelog** — see [PROJECT_STATUS.md](PROJECT_STATUS.md) for current status.
+> **Historical changelog** — narrative of past changes; not a live status doc. For current behaviour and roadmap, see [PROJECT_STATUS.md](PROJECT_STATUS.md), [HANDOVER.md](HANDOVER.md), and [docs/INDEX.md](docs/INDEX.md).
 
 ## Overview
 All planned improvements have been successfully implemented, fixing critical bugs and adding significant performance and UX enhancements.

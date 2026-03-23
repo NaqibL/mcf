@@ -36,7 +36,7 @@ A detailed rundown of what is implemented vs. what was discussed but not yet don
 ### Matching & API
 | Feature | Status | Notes |
 |---------|--------|------|
-| Hybrid matching (semantic + skills) | Done | `MatchingService` |
+| Semantic matching (cosine + recency; skills weight 0) | Done | `MatchingService` |
 | Resume mode / Taste mode | Done | Filter by profile embedding type |
 | Filters (similarity, recency, top_k) | Done | `min_similarity`, `max_days_old`, `top_k` |
 | Interaction tracking | Done | `interested`, `not_interested` etc. |
@@ -129,11 +129,13 @@ A detailed rundown of what is implemented vs. what was discussed but not yet don
 
 ## 5. Quick Reference: Key Files
 
-| Purpose | File |
-|---------|------|
-| Crawl pipeline | `src/mcf/lib/pipeline/incremental_crawl.py` |
-| Embedding (1-by-1 in crawl) | `incremental_crawl.py:76-106` |
-| Re-process endpoint | `src/mcf/api/server.py:128-140` |
+Search the codebase for symbols rather than relying on line numbers (they drift).
+
+| Purpose | File / symbol |
+|---------|----------------|
+| Crawl pipeline | `src/mcf/lib/pipeline/incremental_crawl.py` — `run_incremental_crawl` |
+| Embedding in crawl loop | Same file — search `embed` / `Embedder` |
+| Resume re-process / upload | `src/mcf/api/server.py` — `process_resume`, `upload_resume` |
 | Auth gate | `frontend/app/components/AuthGate.tsx` |
 | Schema | `scripts/schema.sql` |
 | Daily crawl workflow | `.github/workflows/daily-crawl.yml` |

@@ -1,4 +1,6 @@
- # Job Matcher — Your Setup & Operations Guide
+# Job Matcher — Your Setup & Operations Guide
+
+Developers: see [HANDOVER.md](HANDOVER.md) and [docs/INDEX.md](docs/INDEX.md) for architecture and repo map. This guide is for **operators** setting up hosted services.
 
 This guide explains **what you need to do yourself** (no coding) vs **what the app does automatically**. Steps marked **YOU DO THIS** require you to log in to a dashboard or change a setting. Everything else is handled by the code.
 

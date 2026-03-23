@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Users/Luqman/Desktop/projects/careersfuture/mcf-main -type d ! -path */.venv/* ! -path */.git/* ! -path */node_modules/*)"
+    ]
+  }
+}

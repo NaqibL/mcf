@@ -1,7 +1,7 @@
 [project]
 name = "mcf"
 version = "0.1.0"
-description = "Add your description here"
+description = "MyCareersFuture and Careers@Gov job crawler, BGE embeddings, and resume/taste matching API with Next.js dashboard"
 readme = "README.md"
 authors = [
     { name = "Wong Ding Feng", email = "dingfengwong@gmail.com" }

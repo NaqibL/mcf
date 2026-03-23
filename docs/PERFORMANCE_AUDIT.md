@@ -1,5 +1,7 @@
 # MCF Frontend — Performance Audit
 
+> **Snapshot only** — bundle sizes and findings reflect the audit date below; re-run analysis after major dependency or route changes.
+
 **Date:** March 2025  
 **Build:** Next.js 14.2.35
 

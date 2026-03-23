@@ -218,6 +218,19 @@ The daily crawl runs automatically every day to fetch new jobs.
 6. **Value**: Paste your Supabase Postgres connection string (the same one you used in Railway).
 7. Click **"Add secret"**.
 
+### Step 4.1b (Optional): Post-crawl webhook and cache invalidation
+
+The crawl pipeline can call your Vercel app after a crawl to revalidate dashboard and match caches (`incremental_crawl.py` → `POST /api/webhooks/crawl-complete`). That requires **`CRON_SECRET`** (or `REVALIDATE_SECRET`) and a reachable app URL (`CRAWL_WEBHOOK_URL` or `NEXT_PUBLIC_VERCEL_URL`).
+
+The default **Daily Job Crawl** workflow only passes `DATABASE_URL`. It does **not** set these variables, so **scheduled GitHub crawls will not trigger the webhook** unless you add repository secrets and extend the workflow env, for example:
+
+| Secret | Purpose |
+|--------|---------|
+| `CRON_SECRET` | Same value as in Railway/Vercel; sent as `X-Crawl-Secret` to the webhook |
+| `CRAWL_WEBHOOK_URL` | Your production site origin, e.g. `https://your-app.vercel.app` (webhook path is appended in code) |
+
+Without them, invalidate caches manually after crawls if needed (`POST /api/admin/invalidate-pool`, dashboard revalidation routes) or rely on TTLs.
+
 ### Step 4.2: Verify the Workflow
 
 1. The workflow file is at `.github/workflows/daily-crawl.yml`.

@@ -32,7 +32,7 @@ curl -X POST https://your-api.railway.app/api/admin/invalidate-pool
 1. Match request → `get_pool_or_fetch(store)`
 2. If cache hit → use cached pool
 3. If cache miss → `store.get_active_jobs_pool()` → cache → return
-4. `compute_ranked_from_pool(pool, query_embedding, limit)` computes cosine distances in memory
+4. `compute_ranked_from_pool(pool, query_embedding, limit)` computes cosine distances in memory (`MatchingService` uses `limit=2000` for the ranked slice used in scoring and pagination — see `matching_service.py`).
 
 ## Limitations
 

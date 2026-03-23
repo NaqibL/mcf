@@ -1,8 +1,10 @@
 # mcf
 
-MyCareersFuture job crawler and matcher for Singapore - local personal use.
+MyCareersFuture job crawler and matcher for Singapore — local or team use.
 
-**Deployed app?** See [USER_GUIDE.md](USER_GUIDE.md) for a simple checklist of what you need to do (Supabase, Railway, Vercel) — no coding required.
+**New to the repo?** Start with [HANDOVER.md](HANDOVER.md) and the full doc map [docs/INDEX.md](docs/INDEX.md).
+
+**Deployed app?** See [USER_GUIDE.md](USER_GUIDE.md) for a simple checklist (Supabase, Railway, Vercel) — no coding required.
 
 ## Features
 
@@ -25,6 +27,8 @@ cd frontend
 npm install
 cd ..
 ```
+
+**Python dependencies:** [pyproject.toml](pyproject.toml) and [uv.lock](uv.lock) are the source of truth for `uv sync`. [requirements.txt](requirements.txt) is **auto-generated** (`uv pip compile pyproject.toml -o requirements.txt`) for [Dockerfile.api](Dockerfile.api); update it whenever you change Python deps.
 
 ### 2. Place Your Resume
 
@@ -72,7 +76,7 @@ uv run mcf match-jobs
 **Via Web Dashboard:**
 ```bash
 # Start API server (terminal 1)
-uv run python -m  uvicorn mcf.api.server:app --reload --port 8000
+uv run uvicorn mcf.api.server:app --reload --port 8000
 
 # Start frontend (terminal 2)
 cd frontend

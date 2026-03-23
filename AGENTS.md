@@ -1,6 +1,6 @@
 # AI Agent Quick Reference — MCF Job Matcher
 
-For AI agents working on this codebase. See [PROJECT_STATUS.md](PROJECT_STATUS.md) for feature status, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for data flow.
+For AI agents working on this codebase. Start with [HANDOVER.md](HANDOVER.md) and [docs/INDEX.md](docs/INDEX.md). See [PROJECT_STATUS.md](PROJECT_STATUS.md) for feature status, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for data flow, [docs/RUNTIME_FLOWS.md](docs/RUNTIME_FLOWS.md) for auth and caching paths.
 
 ---
 
@@ -10,7 +10,7 @@ For AI agents working on this codebase. See [PROJECT_STATUS.md](PROJECT_STATUS.m
 |--------|-----------|
 | **API** | `src/mcf/api/server.py` — FastAPI app, routes, lifespan |
 | **Auth** | `src/mcf/api/auth.py`, `frontend/app/components/AuthGate.tsx` |
-| **Matching** | `src/mcf/api/services/matching_service.py` — hybrid semantic + skills |
+| **Matching** | `src/mcf/api/services/matching_service.py` — pure semantic (cosine + recency); skills weight is 0 |
 | **Storage** | `src/mcf/lib/storage/base.py` (interface), `postgres_store.py`, `duckdb_store.py` |
 | **Crawl** | `src/mcf/lib/pipeline/incremental_crawl.py`, `lib/sources/mcf_source.py`, `cag_source.py` |
 | **Embeddings** | `src/mcf/lib/embeddings/embedder.py`, `resume.py`, `job_text.py` |
@@ -34,8 +34,8 @@ For AI agents working on this codebase. See [PROJECT_STATUS.md](PROJECT_STATUS.m
 2. Add corresponding function in `frontend/lib/api.ts` if frontend needs it
 
 ### Modify matching logic
-1. `matching_service.py` — scoring, filters, session creation
-2. `store.get_active_job_ids_ranked()` — vector pool + ranking (Postgres uses pgvector when available; DuckDB does full scan)
+1. `matching_service.py` — scoring (semantic + recency only; skills weight is 0), filters, session creation
+2. `store.get_active_job_ids_ranked()` — vector pool + ranking (Postgres uses pgvector when available; DuckDB does full scan). Called with `limit=2000` from `_build_session`.
 3. **Skill**: `.cursor/skills/matching-algorithm/` — use when changing fit scores, recency, taste formula, or vector ranking
 
 ### Change crawl behavior
@@ -69,7 +69,7 @@ Requires `DATABASE_URL` (Postgres). Output is markdown with tables, columns, typ
 |-------|---------|
 | **Matches cache** | Next.js uses `unstable_cache` (15 min TTL). Invalidate via `POST /api/revalidate-matches` after resume/rating. Alternative: `ENABLE_MATCHES_CACHE=1` on FastAPI when bypassing Next.js. See [docs/MATCHES_CACHE.md](docs/MATCHES_CACHE.md). |
 | **Active jobs pool cache** | `ENABLE_ACTIVE_JOBS_POOL_CACHE=1` caches (job_uuid, embedding, last_seen_at) for 15 min. Invalidate via `POST /api/admin/invalidate-pool` after crawl. See [docs/ACTIVE_JOBS_POOL_CACHE.md](docs/ACTIVE_JOBS_POOL_CACHE.md). |
-| **Vector pool size** | `get_active_job_ids_ranked(limit=20000)` — 20k pool balances load-more coverage vs query performance. Too large → timeout. |
+| **Vector pool size** | `MatchingService` calls `get_active_job_ids_ranked(..., limit=2000)` — 2k ranked candidates before filters; larger pools risk timeouts. Storage may still scan a larger active set when building the pool. |
 | **DuckDB vs Postgres** | DuckDB has no vector search; does full scan. Postgres uses pgvector when `scripts/migrations/001_add_pgvector.sql` is applied. |
 | **Storage selection** | `_make_store()` in server.py: `DATABASE_URL` → PostgresStore, else DuckDBStore. |
 | **Dashboard source filter** | Dashboard shows MCF only (`by_source=mcf`); CAG hidden. Filter "Unknown" from category/employment/position charts. |
@@ -80,6 +80,11 @@ Requires `DATABASE_URL` (Postgres). Output is markdown with tables, columns, typ
 
 ## Related Docs
 
+- [HANDOVER.md](HANDOVER.md) — team onboarding (humans + agents)
+- [docs/INDEX.md](docs/INDEX.md) — full documentation map
+- [docs/TECH_STACK.md](docs/TECH_STACK.md) — versions, env vars, dependencies
+- [docs/REPOSITORY_MAP.md](docs/REPOSITORY_MAP.md) — modules, routes, CLI
+- [docs/RUNTIME_FLOWS.md](docs/RUNTIME_FLOWS.md) — auth, matches, webhooks, caching
 - [PROJECT_STATUS.md](PROJECT_STATUS.md) — implemented vs planned, known bugs
 - [IMPROVEMENTS_SUMMARY.md](IMPROVEMENTS_SUMMARY.md) — historical changelog
 - [scripts/BACKFILL_README.md](scripts/BACKFILL_README.md) — backfill rich job fields
