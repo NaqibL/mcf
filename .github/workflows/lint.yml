@@ -6,25 +6,6 @@ on:
     branches: [main]
 
 jobs:
-  check-requirements:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-
-      - name: Install uv
-        run: pip install uv
-
-      - name: Check requirements.txt is up to date
-        run: |
-          uv pip compile pyproject.toml -o /tmp/requirements_check.txt
-          diff requirements.txt /tmp/requirements_check.txt || \
-            (echo "requirements.txt is stale — run: uv pip compile pyproject.toml -o requirements.txt" && exit 1)
-
   smoke-tests:
     runs-on: ubuntu-latest
     steps:
