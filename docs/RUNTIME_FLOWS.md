@@ -44,7 +44,7 @@ Typical production path when the frontend uses the Next proxy ([`matches` route 
 | Next.js `unstable_cache` | Route handlers under `frontend/app/api/` | e.g. matches 15 min, dashboard summary 1h |
 | Supabase RPC cache | `rpc_result_cache` table | See [SUPABASE_RPC.md](SUPABASE_RPC.md) |
 
-Invalidate user matches after resume/taste updates: `POST /api/revalidate-matches` (Next) or tags documented in [MATCHES_CACHE.md](MATCHES_CACHE.md).
+Invalidate user matches after resume/taste updates: `POST /api/revalidate-matches` (Next). See [CACHING_STRATEGIES.md](CACHING_STRATEGIES.md) for full details.
 
 ---
 

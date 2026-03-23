@@ -344,25 +344,7 @@ Update `_ALGOLIA_API_KEY` and optionally `_ALGOLIA_APP_ID` in `cag_source.py`. T
 
 ---
 
-## 8. Polish — USER_GUIDE tone
-
-**Status:** Pending, low priority  
-**Priority:** P3  
-**Effort:** S
-
-### The problem
-
-[`USER_GUIDE.md`](../USER_GUIDE.md) was written for a developer and occasionally refers to "the developer" as a separate person from the reader. Some steps also mention "Phase 4 — pgvector" as conditional without making it clear whether it is required.
-
-### Fix
-
-- Replace "the developer will..." with "you will..." or just imperatives.
-- In the pgvector section, add a note: "This step is optional but strongly recommended for performance. Without it, matching queries do a full scan and are slower."
-- The developer pointer added at the top of the file is already there (added in handover pass).
-
----
-
-## 9. Optional — Split server.py into routers
+## 8. Optional — Split server.py into routers
 
 **Status:** Optional, not started  
 **Priority:** P3  
@@ -406,25 +388,23 @@ app.include_router(dashboard.router)
 
 ---
 
-## 10. Optional — CLI check-jobs command
+## 9. Optional — CLI check-jobs command
 
-**Status:** Optional, not started  
-**Priority:** P3  
+**Status:** Optional, not started
+**Priority:** P3
 **Effort:** S
 
 ### Context
 
-[`scripts/check_inactive.py`](../scripts/check_inactive.py) is a fragile one-off script that uses `sys.path.insert` to import `mcf.api.config` and runs direct Postgres queries to show active/inactive job counts and recent job run statuses. It is useful for production health checks.
+A production health check command would show active/inactive job counts and recent run statuses without needing the Supabase SQL Editor.
 
 ### Fix
 
-Promote it into the CLI as `mcf check-jobs --db-url $DATABASE_URL`:
+Add `mcf check-jobs --db-url $DATABASE_URL` to `src/mcf/cli/cli.py`:
 
-1. In `src/mcf/cli/cli.py`, add a `check-jobs` command.
-2. Use `_open_store(db, db_url)` to get a `PostgresStore`.
-3. Call existing store methods: `get_dashboard_summary()`, `get_recent_runs(limit=5)`.
-4. Print with `rich`.
-5. Delete `scripts/check_inactive.py`.
+1. Use `_open_store(db, db_url)` to get a store.
+2. Call existing store methods: `get_dashboard_summary()`, `get_recent_runs(limit=5)`.
+3. Print with `rich`.
 
 ---
 
@@ -820,18 +800,17 @@ Add a "Lowball" entry to the nav links array (exact position: after `/dashboard`
 
 | # | Item | Status | Priority | Effort |
 |---|------|--------|----------|--------|
-| 1 | Apply RLS migrations in Supabase | Pending | P1 | S |
-| 2 | Dashboard caching (5 routes + Railway env) | Pending | P1 | M |
-| 3 | GH Actions webhook secrets | Pending | P2 | S |
-| 4 | CLI mark-interaction Postgres parity | Pending | P3 | M |
-| 5 | Smoke tests (pytest) | Pending | P2 | M |
-| 6 | requirements.txt sync (process + optional CI) | Pending | P2 | S |
-| 7 | CAG Algolia key (act only if CAG breaks) | Monitor | P3 | S |
-| 8 | USER_GUIDE tone cleanup | Pending | P3 | S |
-| 9 | Split server.py into routers | Optional | P3 | L |
-| 10 | Promote check_inactive.py to CLI command | Optional | P3 | S |
-| 11 | How to add a new job source | Reference | — | — |
-| 12 | Lowball checker (new feature) | Pending | P1 | L |
+| 1 | Apply RLS migrations in Supabase | **Done** | P1 | S |
+| 2 | Dashboard caching (5 routes + Railway env) | **Done** | P1 | M |
+| 3 | GH Actions webhook secrets | **Done** (env vars in workflow; add GitHub secrets if you want post-crawl flush) | P2 | S |
+| 4 | CLI mark-interaction Postgres parity | **Done** | P3 | M |
+| 5 | Smoke tests (pytest) | **Done** | P2 | M |
+| 6 | requirements.txt sync | **Done** (CI check removed — platform-specific; process documented in README) | P2 | S |
+| 7 | CAG Algolia key | **Done** (moved to `CAG_ALGOLIA_API_KEY` env var; hardcoded value is fallback) | P3 | S |
+| 8 | Split server.py into routers | Optional | P3 | L |
+| 9 | Add `mcf check-jobs` CLI command | Optional | P3 | S |
+| 10 | How to add a new job source | Reference | — | — |
+| 11 | Lowball checker (new feature) | Pending | P1 | L |
 
 ---
 

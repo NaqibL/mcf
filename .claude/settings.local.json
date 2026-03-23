@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(find /c/Users/Luqman/Desktop/projects/careersfuture/mcf-main -type d ! -path */.venv/* ! -path */.git/* ! -path */node_modules/*)",
-      "Bash(uv pip:*)"
+      "Bash(uv pip:*)",
+      "Bash(grep -r \"TODO\\\\|FIXME\\\\|XXX\\\\|HACK\\\\|DEAD\\\\|UNUSED\" /c/Users/Luqman/Desktop/projects/careersfuture/mcf-main/src --include=*.py)",
+      "Bash(grep -r \"TODO\\\\|FIXME\\\\|XXX\\\\|HACK\\\\|DEAD\\\\|UNUSED\" /c/Users/Luqman/Desktop/projects/careersfuture/mcf-main/frontend --include=*.ts*)",
+      "Bash(cd:*)",
+      "Bash(npm install:*)"
     ]
   }
 }

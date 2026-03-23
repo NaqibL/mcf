@@ -1,7 +1,5 @@
 # Deployment Guide — Job Matcher
 
-> **For a simpler checklist of what YOU need to do (no coding):** see [USER_GUIDE.md](USER_GUIDE.md). It clearly separates your manual steps from what the app does automatically.
-
 This guide walks you through deploying the Job Matcher app step by step. Follow each section in order. You will use:
 
 - **Supabase** (free): Database, user sign-in, and file storage

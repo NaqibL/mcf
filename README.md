@@ -1,330 +1,102 @@
 # mcf
 
-MyCareersFuture job crawler and matcher for Singapore — local or team use.
+MyCareersFuture job crawler and matcher for Singapore — local or hosted.
 
-**New to the repo?** Start with [HANDOVER.md](HANDOVER.md) and the full doc map [docs/INDEX.md](docs/INDEX.md).
-
-**Deployed app?** See [USER_GUIDE.md](USER_GUIDE.md) for a simple checklist (Supabase, Railway, Vercel) — no coding required.
+**New?** Start with [HANDOVER.md](HANDOVER.md).
 
 ## Features
 
-- **Job Scraping**: Incremental crawling of MyCareersFuture job listings
-- **Resume Matching**: Match your resume against scraped jobs using semantic similarity
-- **Interaction Tracking**: Track which jobs you've viewed, applied to, or dismissed
-- **Local Database**: DuckDB for local storage (no cloud required)
-- **Web Dashboard**: Simple localhost UI for viewing matches and managing interactions
+- Incremental crawling of MyCareersFuture + Careers@Gov listings
+- Semantic resume matching (BGE embeddings, cosine similarity + recency decay)
+- Taste profiles — rate jobs to build a preference embedding
+- Interaction tracking (viewed, applied, dismissed, saved)
+- Analytics dashboard (active jobs, categories, salary distribution)
+- DuckDB locally; PostgreSQL + Supabase for hosted use
 
-## Quick Start
-
-### 1. Install Dependencies
+## Quick Start (local)
 
 ```bash
-# Install Python dependencies
+# 1. Install dependencies
 uv sync
+cd frontend && npm install && cd ..
 
-# Install frontend dependencies
-cd frontend
-npm install
-cd ..
-```
-
-**Python dependencies:** [pyproject.toml](pyproject.toml) and [uv.lock](uv.lock) are the source of truth for `uv sync`. [requirements.txt](requirements.txt) is **auto-generated** (`uv pip compile pyproject.toml -o requirements.txt`) for [Dockerfile.api](Dockerfile.api); update it whenever you change Python deps.
-
-### 2. Place Your Resume
-
-Create a `resume/` folder and place your resume file there:
-
-```bash
+# 2. Place resume
 mkdir resume
-# Place your resume as: resume/resume.pdf (or .docx, .txt, .md)
-```
+# copy resume.pdf (or .docx / .txt / .md) into resume/
 
-Supported formats: `.pdf`, `.docx`, `.txt`, `.md`
-
-### 3. Process Your Resume
-
-```bash
-# Process resume and create profile
+# 3. Process resume
 uv run mcf process-resume
-```
 
-This will:
-- Extract text from your resume
-- Create a profile
-- Generate an embedding for matching
-
-### 4. Crawl Jobs
-
-```bash
-# Crawl new jobs (run this daily)
+# 4. Crawl jobs
 uv run mcf crawl-incremental
-```
 
-This will:
-- Fetch new jobs from MyCareersFuture
-- Generate embeddings for job descriptions
-- Store basic info + URLs (descriptions not stored to save space)
-
-### 5. Find Matches
-
-**Via CLI:**
-```bash
-# Find matching jobs
-uv run mcf match-jobs
-```
-
-**Via Web Dashboard:**
-```bash
-# Start API server (terminal 1)
-uv run uvicorn mcf.api.server:app --reload --port 8000
-
-# Start frontend (terminal 2)
-cd frontend
-npm run dev
-```
-
-Open http://localhost:3000 and click "Find Matches"
-
-## Usage
-
-### Commands Reference
-
-**Crawling:**
-```bash
-# Careers@Gov only (~2000 jobs, keyword partitioning)
-uv run mcf crawl-incremental --source cag
-
-# MyCareersFuture only
-uv run mcf crawl-incremental --source mcf
-
-# Both sources
-uv run mcf crawl-incremental --source all
-
-# Test with limit
-uv run mcf crawl-incremental --source cag --limit 50
-
-# MCF with category filter
-uv run mcf crawl-incremental --source mcf --categories "Information Technology"
-
-# Custom database path
-uv run mcf crawl-incremental --db path/to/custom.duckdb
-```
-
-**Web dashboard:**
-```bash
-# Terminal 1: API server
-uv run uvicorn mcf.api.server:app --reload --port 8000
-
-# Terminal 2: Frontend
-cd frontend && npm run dev
-
+# 5. Start servers
+uv run uvicorn mcf.api.server:app --reload --port 8000   # terminal 1
+cd frontend && npm run dev                                # terminal 2
 # Open http://localhost:3000
 ```
 
-**Resume & matching:**
-```bash
-# Process resume
-uv run mcf process-resume
-uv run mcf process-resume --resume path/to/resume.pdf
+Copy `.env.example` to `.env` — defaults work out of the box for local dev.
 
-# Find matches (CLI)
+## CLI reference
+
+```bash
+# Crawl
+uv run mcf crawl-incremental                          # MCF (default)
+uv run mcf crawl-incremental --source cag             # Careers@Gov
+uv run mcf crawl-incremental --source all             # both
+uv run mcf crawl-incremental --limit 50               # test run
+uv run mcf crawl-incremental --db-url $DATABASE_URL   # Postgres
+
+# Resume & matching
+uv run mcf process-resume
+uv run mcf process-resume --resume path/to/file.pdf
 uv run mcf match-jobs
 uv run mcf match-jobs --top-k 50 --include-interacted
+
+# Interactions
+uv run mcf mark-interaction <uuid> --type viewed
+uv run mcf mark-interaction <uuid> --type applied
+uv run mcf mark-interaction <uuid> --type dismissed
+uv run mcf mark-interaction <uuid> --type saved
+
+# Database utilities
+uv run mcf re-embed                                   # batch re-embed all jobs
+uv run mcf export-to-postgres --db-url $DATABASE_URL  # DuckDB → Postgres
+uv run mcf backfill-rich-fields                       # fetch salary/category from API
 ```
 
-**Interactions:**
-```bash
-uv run mcf mark-interaction <job-uuid> --type viewed
-uv run mcf mark-interaction <job-uuid> --type applied
-uv run mcf mark-interaction <job-uuid> --type dismissed
-uv run mcf mark-interaction <job-uuid> --type saved
-```
-
-### CLI Commands (detailed)
-
-**Process resume:**
-```bash
-mcf process-resume
-# Or specify custom path:
-mcf process-resume --resume path/to/resume.pdf
-```
-
-**Crawl jobs:**
-```bash
-# Default: uses data/mcf.duckdb
-mcf crawl-incremental
-
-# Custom database path:
-mcf crawl-incremental --db path/to/database.duckdb
-
-# Limit for testing:
-mcf crawl-incremental --limit 100
-```
-
-**Find job matches:**
-```bash
-# Find top 25 matches (excludes interacted jobs)
-mcf match-jobs
-
-# Include interacted jobs:
-mcf match-jobs --include-interacted
-
-# Get more matches:
-mcf match-jobs --top-k 50
-```
-
-**Mark job interaction:**
-```bash
-mcf mark-interaction <job-uuid> --type viewed
-mcf mark-interaction <job-uuid> --type applied
-mcf mark-interaction <job-uuid> --type dismissed
-mcf mark-interaction <job-uuid> --type saved
-```
-
-**Local crawl then export to Supabase:**
-```bash
-uv run mcf crawl-incremental --db data/mcf.duckdb --source cag
-uv run mcf export-to-postgres --db data/mcf.duckdb --db-url $DATABASE_URL
-```
-See [scripts/LOCAL_CRAWL_WORKFLOW.md](scripts/LOCAL_CRAWL_WORKFLOW.md) for the full workflow.
-
-**Backfill rich metadata (categories, employment type, salary):**
-
-After running migration `003_add_rich_job_fields.sql`, existing jobs have NULL in the new columns. Use the backfill command to fetch and populate them from the MCF API. Run locally (GitHub Actions may timeout for large datasets).
-
-```bash
-# Postgres (Supabase) — uses DATABASE_URL
-uv run mcf backfill-rich-fields
-
-# Batched run (e.g. 5000 jobs per run)
-uv run mcf backfill-rich-fields --limit 5000
-
-# DuckDB
-uv run mcf backfill-rich-fields --db data/mcf.duckdb
-
-# Slower rate limit if hitting API limits
-uv run mcf backfill-rich-fields --rate-limit 2
-```
-
-See [scripts/BACKFILL_README.md](scripts/BACKFILL_README.md) for details.
-
-### API Endpoints
-
-- `GET /api/profile` - Get profile and resume status
-- `POST /api/profile/process-resume` - Process resume from file
-- `GET /api/matches` - Get job matches for your resume
-- `GET /api/jobs` - List jobs (excludes interacted by default)
-- `GET /api/jobs/{job_uuid}` - Get job basic info
-- `POST /api/jobs/{job_uuid}/interact` - Mark job as interacted
-- `GET /api/health` - Health check
-
-### Daily Workflow
-
-1. **Morning**: Run `mcf crawl-incremental` to fetch new jobs
-2. **Afternoon**: Open dashboard at http://localhost:3000
-3. **Click "Find Matches"**: See new jobs matching your resume
-4. **Interact with jobs**: Click "Viewed", "Applied", "Dismissed", or "Save"
-5. **Next day**: Only new/unviewed jobs will appear (interacted jobs are filtered out)
-
-## Architecture
-
-- **Backend**: FastAPI (Python)
-- **Frontend**: Next.js 14 (React, TypeScript)
-- **Database**: DuckDB (local) **or** PostgreSQL / Supabase (hosted)
-- **Auth**: Supabase email+password (optional — local dev works without it)
-- **Storage**: Only stores embeddings + basic info + URLs (no full descriptions)
-
-## Configuration
-
-Copy `.env.example` to `.env` and fill in the values.  For local dev the defaults work out of the box.
-
-Key variables:
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `DB_PATH` | `data/mcf.duckdb` | Local DuckDB path |
-| `DATABASE_URL` | *(unset)* | Postgres URL — activates hosted mode |
-| `RESUME_PATH` | `resume/resume.pdf` | Local resume path (dev fallback) |
-| `SUPABASE_JWT_SECRET` | *(unset)* | Enables auth when set |
-| `SUPABASE_URL` | *(unset)* | Enables file storage when set |
-| `SUPABASE_SERVICE_KEY` | *(unset)* | Required with `SUPABASE_URL` |
-| `ALLOWED_ORIGINS` | `http://localhost:3000` | Comma-separated CORS origins |
+For MCF category segmentation (5-run strategy): [docs/CRAWL_STRATEGY.md](docs/CRAWL_STRATEGY.md).
+For local crawl → export workflow: [scripts/LOCAL_CRAWL_WORKFLOW.md](scripts/LOCAL_CRAWL_WORKFLOW.md).
+For backfill details: [scripts/BACKFILL_README.md](scripts/BACKFILL_README.md).
 
 ## Deployment (~$5/month)
 
-This stack runs for ~$5/month using free-tier services plus Railway Hobby.
-
 | Service | Cost | Purpose |
-|---|---|---|
-| **Supabase** | Free | Postgres DB + Auth + File Storage |
-| **Railway Hobby** | $5/mo | Python API (always-on, 8 GB RAM) |
-| **Vercel** | Free | Next.js frontend |
-| **GitHub Actions** | Free | Daily crawl cron |
+|---------|------|---------|
+| Supabase | Free | Postgres, Auth, Storage |
+| Railway Hobby | $5/mo | FastAPI (always-on) |
+| Vercel | Free | Next.js frontend |
+| GitHub Actions | Free | Daily crawl cron |
 
-### Steps
+See [DEPLOYMENT.md](DEPLOYMENT.md) for step-by-step instructions.
 
-1. **Create a Supabase project** at [supabase.com](https://supabase.com)
-   - Run `scripts/schema.sql` in the SQL editor
-   - Copy the Postgres connection string, URL, and service key (see USER_GUIDE for auth setup)
+## Development
 
-2. **Deploy the API to Railway**
-   - Connect your GitHub repo, select `Dockerfile.api`
-   - Set environment variables: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `ALLOWED_ORIGINS`
-
-3. **Deploy the frontend to Vercel**
-   - Set `NEXT_PUBLIC_API_URL` to your Railway API URL
-   - Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-
-4. **Add GitHub Actions secret**
-   - In your repo settings → Secrets, add `DATABASE_URL` (same Supabase Postgres URL)
-   - The daily crawl will run at 02:00 UTC every day
-
-5. **Add users**
-   - Users can self-signup (email+password) or you create them in Supabase Dashboard. See [USER_GUIDE.md](USER_GUIDE.md) Part 5.
-
-## Development Guide
-
-### How to Add New Packages
-
-To add a new production dependency:
 ```bash
-uv add requests
-```
-
-To add a new development dependency:
-```bash
-uv add --dev ipdb
-```
-
-After adding dependencies, always re-generate requirements.txt:
-```bash
+# Add a Python dependency
+uv add <package>
+# Then regenerate requirements.txt (used by Dockerfile.api):
 uv pip compile pyproject.toml -o requirements.txt
+
+# Add a dev dependency
+uv add --dev <package>
+
+# Run tests
+uv run pytest tests/ -v
 ```
 
-## File Structure
-
-```
-mcf-main/
-├── resume/              # Place your resume here (gitignored)
-├── data/               # Database files (gitignored)
-├── src/mcf/
-│   ├── api/            # FastAPI server
-│   ├── cli/            # CLI commands
-│   ├── lib/
-│   │   ├── crawler/    # Job crawler
-│   │   ├── storage/    # DuckDB storage
-│   │   ├── embeddings/ # Embedding generation
-│   │   └── pipeline/   # Crawl pipeline
-└── frontend/           # Next.js dashboard
-```
-
-## Notes
-
-- Job descriptions are **not stored** in the database to save space
-- Only embeddings, basic info (title, company, location), and URLs are stored
-- Click job URLs to see full descriptions on MyCareersFuture
-- Jobs you've interacted with won't appear in future matches (unless you include them)
-- Matches are sorted by similarity score, then by recency (newest first)
+`pyproject.toml` + `uv.lock` are the source of truth for Python deps. `requirements.txt` is auto-generated for Docker — do not hand-edit.
 
 ## License
 

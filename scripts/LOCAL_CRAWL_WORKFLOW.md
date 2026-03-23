@@ -29,7 +29,7 @@ uv run mcf crawl-incremental --db data/mcf.duckdb --source cag
 # Option B: MyCareersFuture — one category for testing
 uv run mcf crawl-incremental --db data/mcf.duckdb --source mcf --categories "Information Technology" --limit 500
 
-# Option C: Full MCF — run 5 times (see CRAWL_RUNS.md for category list)
+# Option C: Full MCF — run 5 times (see docs/CRAWL_STRATEGY.md for category list)
 uv run mcf crawl-incremental --db data/mcf.duckdb --source mcf --categories "Accounting / Auditing / Taxation,..."
 # ... repeat for runs 2–5
 ```
@@ -59,7 +59,7 @@ uv run mcf export-to-postgres --db data/mcf.duckdb --db-url $env:DATABASE_URL
 
 If you want fast vector search, run `scripts/migrations/001_add_pgvector.sql` in Supabase SQL Editor. This backfills the vector column from `embedding_json` and creates indexes.
 
-If the HNSW index times out, set `statement_timeout` first or use IVFFlat (see USER_GUIDE troubleshooting).
+If the HNSW index times out, set `statement_timeout` first or use IVFFlat (see DEPLOYMENT.md troubleshooting).
 
 ---
 

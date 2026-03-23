@@ -20,7 +20,7 @@ A detailed rundown of what is implemented vs. what was discussed but not yet don
 | Incremental crawl (MCF + Careers@Gov) | Done | `mcf crawl-incremental` — list IDs, diff, fetch detail, embed |
 | DuckDB storage | Done | Default `data/mcf.duckdb` |
 | Postgres/Supabase storage | Done | Via `DATABASE_URL` or `--db-url` |
-| Category segmentation (5 runs) | Done | See `CRAWL_RUNS.md` |
+| Category segmentation (5 runs) | Done | See `docs/CRAWL_STRATEGY.md` |
 | GitHub Actions daily crawl | Done | `.github/workflows/daily-crawl.yml` — 6h timeout |
 | Job embeddings (BGE) | Done | One-by-one in crawl loop; batched in `re-embed` |
 
@@ -40,16 +40,16 @@ A detailed rundown of what is implemented vs. what was discussed but not yet don
 | Resume mode / Taste mode | Done | Filter by profile embedding type |
 | Filters (similarity, recency, top_k) | Done | `min_similarity`, `max_days_old`, `top_k` |
 | Interaction tracking | Done | `interested`, `not_interested` etc. |
-| Optimized N+1 fix | Done | Single query for job embeddings (IMPROVEMENTS_SUMMARY) |
+| Optimized N+1 fix | Done | Single query for job embeddings |
 
 ### Frontend
 | Feature | Status | Notes |
 |---------|--------|------|
 | Discover tab | Done | Rate jobs, build taste profile |
 | Matches tab | Done | Filter by mode, similarity, recency |
-| Job cards (color-coded scores, days ago) | Done | IMPROVEMENTS_SUMMARY |
-| Toast notifications | Done | `react-hot-toast` |
-| Optimistic updates (dismiss) | Done | IMPROVEMENTS_SUMMARY |
+| Job cards (color-coded scores, days ago) | Done | |
+| Toast notifications | Done | `sonner` |
+| Optimistic updates (dismiss) | Done | |
 | Replace resume | Done | Upload new file |
 | Re-process button | Done | Fetches from Supabase Storage when local file missing |
 
@@ -59,7 +59,7 @@ A detailed rundown of what is implemented vs. what was discussed but not yet don
 | `mcf crawl-incremental` | Done | MCF, CAG, or both |
 | `mcf process-resume` | Done | Local file only |
 | `mcf match-jobs` | Done | CLI matching |
-| `mcf mark-interaction` | Done | DuckDB only (no `--db-url`) |
+| `mcf mark-interaction` | Done | DuckDB and Postgres (`--db-url`) |
 | `mcf re-embed` | Done | Batch re-embed all jobs |
 | `mcf export-to-postgres` | Done | Export DuckDB crawl data to Supabase |
 
