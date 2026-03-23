@@ -5,57 +5,57 @@ from fastapi.testclient import TestClient
 
 from mcf.api.server import app
 
-client = TestClient(app)
+
+@pytest.fixture(scope="session")
+def client():
+    """TestClient used as context manager so the lifespan runs (initialises _store)."""
+    with TestClient(app) as c:
+        yield c
 
 
-def test_health():
+def test_health(client):
     r = client.get("/api/health")
     assert r.status_code == 200
 
 
-def test_summary_public():
+def test_summary_public(client):
     r = client.get("/api/dashboard/summary-public")
     assert r.status_code == 200
     data = r.json()
     assert "total_jobs" in data
 
 
-def test_active_jobs_over_time_public():
+def test_active_jobs_over_time_public(client):
     r = client.get("/api/dashboard/active-jobs-over-time-public")
     assert r.status_code == 200
-    data = r.json()
-    assert isinstance(data, list)
+    assert isinstance(r.json(), list)
 
 
-def test_jobs_by_category_public():
+def test_jobs_by_category_public(client):
     r = client.get("/api/dashboard/jobs-by-category-public")
     assert r.status_code == 200
-    data = r.json()
-    assert isinstance(data, list)
+    assert isinstance(r.json(), list)
 
 
-def test_jobs_by_employment_type_public():
+def test_jobs_by_employment_type_public(client):
     r = client.get("/api/dashboard/jobs-by-employment-type-public")
     assert r.status_code == 200
-    data = r.json()
-    assert isinstance(data, list)
+    assert isinstance(r.json(), list)
 
 
-def test_jobs_by_position_level_public():
+def test_jobs_by_position_level_public(client):
     r = client.get("/api/dashboard/jobs-by-position-level-public")
     assert r.status_code == 200
-    data = r.json()
-    assert isinstance(data, list)
+    assert isinstance(r.json(), list)
 
 
-def test_salary_distribution_public():
+def test_salary_distribution_public(client):
     r = client.get("/api/dashboard/salary-distribution-public")
     assert r.status_code == 200
-    data = r.json()
-    assert isinstance(data, list)
+    assert isinstance(r.json(), list)
 
 
-def test_authed_routes_require_auth():
+def test_authed_routes_require_auth(client):
     """Auth-protected routes must return 401/403, not 500."""
     for path in [
         "/api/profile",
