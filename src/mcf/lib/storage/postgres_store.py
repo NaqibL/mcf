@@ -1558,6 +1558,18 @@ class PostgresStore(Storage):
         by_bucket = {r[0]: r[1] for r in rows}
         return [{"bucket": b, "count": by_bucket.get(b, 0)} for b in bucket_order]
 
+    def get_jobs_with_salary_by_uuids(self, job_uuids: list[str]) -> list[dict]:
+        if not job_uuids:
+            return []
+        with self._cur() as cur:
+            cur.execute(
+                "SELECT job_uuid, title, company_name, job_url, salary_min, salary_max "
+                "FROM jobs WHERE job_uuid = ANY(%s)",
+                (job_uuids,),
+            )
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
+
     # === Match recording ===
 
     def record_match(

@@ -10,6 +10,8 @@ from pathlib import Path
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, UploadFile, File, Header
+from pydantic import BaseModel
+from statistics import quantiles as _quantiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -138,6 +140,55 @@ def get_store() -> Storage:
     if _store is None:
         raise RuntimeError("Store not initialised")
     return _store
+
+
+# ---------------------------------------------------------------------------
+# Pydantic models
+# ---------------------------------------------------------------------------
+
+
+class LowballCheckRequest(BaseModel):
+    job_description: str
+    salary_min: int
+    salary_max: int | None = None
+    top_k: int = 20
+
+
+class LowballResult(BaseModel):
+    verdict: str  # "lowballed"|"below_median"|"at_median"|"above_median"|"insufficient_data"
+    offered_salary: int
+    percentile: float | None
+    market_p25: int | None
+    market_p50: int | None
+    market_p75: int | None
+    salary_coverage: int
+    total_matched: int
+    similar_jobs: list[dict]
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _build_similar_jobs(jobs: list[dict], uuid_to_score: dict[str, float]) -> list[dict]:
+    return [
+        {
+            "job_uuid": j["job_uuid"],
+            "title": j["title"],
+            "company_name": j["company_name"],
+            "job_url": j.get("job_url"),
+            "salary_min": j.get("salary_min"),
+            "salary_max": j.get("salary_max"),
+            "similarity_score": round(uuid_to_score.get(j["job_uuid"], 0.0), 4),
+        }
+        for j in jobs
+    ]
+
+
+def _salary_percentiles(salaries: list[int]) -> tuple[int, int, int]:
+    qs = _quantiles(salaries, n=4)  # [p25, p50, p75]
+    return int(qs[0]), int(qs[1]), int(qs[2])
 
 
 # ---------------------------------------------------------------------------
@@ -823,3 +874,59 @@ def cors_check(request: Request):
         "allowed_origins": allowed,
         "origin_allowed": origin in allowed,
     }
+
+
+# ---------------------------------------------------------------------------
+# Lowball checker
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/lowball/check")
+def check_lowball(body: LowballCheckRequest, user_id: str = Depends(get_current_user)):
+    """Check if an offered salary is competitive for a described role."""
+    store = get_store()
+    embeddings_cache_inst = EmbeddingsCache(store=store) if settings.enable_embeddings_cache else None
+    embedder: EmbedderProtocol = Embedder(EmbedderConfig(), embeddings_cache=embeddings_cache_inst)
+    vector = embedder.embed_text(body.job_description)
+
+    if settings.enable_active_jobs_pool_cache:
+        from mcf.api.active_jobs_pool_cache import get_pool_or_fetch, compute_ranked_from_pool
+        pool = get_pool_or_fetch(store)
+        ranked = compute_ranked_from_pool(pool, vector, limit=500)
+    else:
+        ranked = store.get_active_job_ids_ranked(vector, limit=500)
+
+    top_slice = ranked[: body.top_k * 5]
+    uuid_to_score = {uuid: round(1.0 - dist, 4) for uuid, dist, _ in top_slice}
+
+    jobs = store.get_jobs_with_salary_by_uuids(list(uuid_to_score.keys()))
+    salary_jobs = [j for j in jobs if j.get("salary_min") is not None]
+    offered = body.salary_min if body.salary_max is None else (body.salary_min + body.salary_max) // 2
+
+    if len(salary_jobs) < 5:
+        return LowballResult(
+            verdict="insufficient_data", offered_salary=offered,
+            percentile=None, market_p25=None, market_p50=None, market_p75=None,
+            salary_coverage=len(salary_jobs), total_matched=len(jobs),
+            similar_jobs=_build_similar_jobs(jobs[:body.top_k], uuid_to_score),
+        )
+
+    salaries = sorted(j["salary_min"] for j in salary_jobs)
+    p25, p50, p75 = _salary_percentiles(salaries)
+    percentile = round(sum(1 for s in salaries if s <= offered) / len(salaries) * 100, 1)
+
+    if offered < p25:
+        verdict = "lowballed"
+    elif offered < p50:
+        verdict = "below_median"
+    elif offered < p75:
+        verdict = "at_median"
+    else:
+        verdict = "above_median"
+
+    return LowballResult(
+        verdict=verdict, offered_salary=offered, percentile=percentile,
+        market_p25=p25, market_p50=p50, market_p75=p75,
+        salary_coverage=len(salary_jobs), total_matched=len(jobs),
+        similar_jobs=_build_similar_jobs(jobs[:body.top_k], uuid_to_score),
+    )

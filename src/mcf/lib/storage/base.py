@@ -304,6 +304,10 @@ class Storage(ABC):
     @abstractmethod
     def get_salary_distribution(self) -> list[dict]: ...
 
+    @abstractmethod
+    def get_jobs_with_salary_by_uuids(self, job_uuids: list[str]) -> list[dict]:
+        """Return job_uuid, title, company_name, job_url, salary_min, salary_max for given UUIDs."""
+
     def reset_profile_ratings(self, user_id: str) -> dict:
         """Reset job interactions and taste profile for a user (for testing).
         Returns counts of deleted rows. Override in store implementations."""

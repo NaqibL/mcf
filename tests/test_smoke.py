@@ -64,3 +64,11 @@ def test_authed_routes_require_auth(client):
     ]:
         r = client.get(path)
         assert r.status_code < 500, f"{path} returned {r.status_code}"
+
+
+def test_lowball_check_requires_auth(client):
+    r = client.post("/api/lowball/check", json={
+        "job_description": "Software engineer with Python experience",
+        "salary_min": 5000,
+    })
+    assert r.status_code < 500

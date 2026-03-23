@@ -1566,6 +1566,18 @@ class DuckDBStore(Storage):
         by_bucket = {r[0]: r[1] for r in rows}
         return [{"bucket": b, "count": by_bucket.get(b, 0)} for b in bucket_order]
 
+    def get_jobs_with_salary_by_uuids(self, job_uuids: list[str]) -> list[dict]:
+        if not job_uuids:
+            return []
+        placeholders = ", ".join("?" * len(job_uuids))
+        rows = self._con.execute(
+            f"SELECT job_uuid, title, company_name, job_url, salary_min, salary_max "
+            f"FROM jobs WHERE job_uuid IN ({placeholders})",
+            job_uuids,
+        ).fetchall()
+        cols = ["job_uuid", "title", "company_name", "job_url", "salary_min", "salary_max"]
+        return [dict(zip(cols, row)) for row in rows]
+
     def upsert_taste_embedding(self, *, profile_id: str, model_name: str, embedding: Sequence[float]) -> None:
         """Store a taste-profile embedding.
 

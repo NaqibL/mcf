@@ -6,7 +6,17 @@
       "Bash(grep -r \"TODO\\\\|FIXME\\\\|XXX\\\\|HACK\\\\|DEAD\\\\|UNUSED\" /c/Users/Luqman/Desktop/projects/careersfuture/mcf-main/src --include=*.py)",
       "Bash(grep -r \"TODO\\\\|FIXME\\\\|XXX\\\\|HACK\\\\|DEAD\\\\|UNUSED\" /c/Users/Luqman/Desktop/projects/careersfuture/mcf-main/frontend --include=*.ts*)",
       "Bash(cd:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(uv run:*)",
+      "Bash(python -m pytest tests/test_smoke.py -v)",
+      "Bash(where uv:*)",
+      "Bash(uv --version)",
+      "Bash(\"C:\\\\Users\\\\Luqman\\\\.local\\\\bin\\\\uv.exe\" run:*)",
+      "Bash(cmd /c \"cd C:\\\\\\\\Users\\\\\\\\Luqman\\\\\\\\Desktop\\\\\\\\projects\\\\\\\\careersfuture\\\\\\\\mcf-main && uv run pytest tests/test_smoke.py -v\" 2>&1)",
+      "Bash(cmd /c \"cd /d C:\\\\\\\\Users\\\\\\\\Luqman\\\\\\\\Desktop\\\\\\\\projects\\\\\\\\careersfuture\\\\\\\\mcf-main && uv run pytest tests/test_smoke.py -v 2>&1\")",
+      "Bash(uv.exe run:*)",
+      "Bash(~/.local/bin/uv run:*)",
+      "Bash(/c/Users/Luqman/.local/bin/uv run:*)"
     ]
   }
 }

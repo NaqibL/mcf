@@ -59,3 +59,25 @@ export type InteractionType =
   | 'not_interested'
 
 export type MatchMode = 'resume' | 'taste'
+
+export interface SimilarJob {
+  job_uuid: string
+  title: string
+  company_name: string | null
+  job_url: string | null
+  salary_min: number | null
+  salary_max: number | null
+  similarity_score: number
+}
+
+export interface LowballResult {
+  verdict: 'lowballed' | 'below_median' | 'at_median' | 'above_median' | 'insufficient_data'
+  offered_salary: number
+  percentile: number | null
+  market_p25: number | null
+  market_p50: number | null
+  market_p75: number | null
+  salary_coverage: number
+  total_matched: number
+  similar_jobs: SimilarJob[]
+}
