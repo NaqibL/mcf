@@ -11,7 +11,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts'
-import { BarChart2, Scale, Briefcase, ArrowRight, TrendingUp, Users, Zap } from 'lucide-react'
+import { BarChart2, Scale, Briefcase, ArrowRight } from 'lucide-react'
 import { dashboardApi } from '@/lib/api'
 import { Layout } from './components/layout'
 import NavUserActions from './components/NavUserActions'
@@ -61,24 +61,6 @@ const tools = [
   },
 ]
 
-const highlights = [
-  {
-    icon: TrendingUp,
-    label: 'Live salary benchmarks',
-    detail: 'Real percentile data from active listings',
-  },
-  {
-    icon: Zap,
-    label: 'Instant analysis',
-    detail: 'Results in seconds, no sign-up needed',
-  },
-  {
-    icon: Users,
-    label: 'Resume-to-job matching',
-    detail: 'Semantic matching across thousands of roles',
-  },
-]
-
 export default function HomePage() {
   const [activeJobs, setActiveJobs] = useState<ActiveJobsPoint[]>([])
   const [activeCount, setActiveCount] = useState<number | null>(null)
@@ -93,51 +75,26 @@ export default function HomePage() {
 
   return (
     <Layout userSlot={<NavUserActions />}>
-      <div className="flex flex-col gap-16">
+      <div className="flex flex-col gap-10">
 
-        {/* ── Hero ─────────────────────────────────────────────────────────── */}
-        <section className="-mx-4 lg:-mx-8 px-4 lg:px-8 pt-14 pb-16 bg-gradient-to-br from-indigo-50/80 via-white to-slate-50 dark:from-indigo-950/25 dark:via-slate-900 dark:to-slate-900 border-b border-slate-200/70 dark:border-slate-800">
-          <div className="max-w-2xl">
-            <span className="mb-4 inline-block rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
-              Singapore · Live MCF data
-            </span>
-            <h1 className="text-5xl sm:text-[56px] font-bold tracking-tight text-slate-900 dark:text-slate-50 leading-[1.1]">
-              Know your<br className="hidden sm:block" /> market worth
-            </h1>
-            <p className="mt-5 text-lg text-slate-500 dark:text-slate-400 leading-[1.7] max-w-xl">
-              Job market intelligence powered by live MyCareersFuture listings. Explore hiring
-              trends, check if you&rsquo;re being lowballed, and find roles that fit your resume.
-            </p>
-            <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Link
-                href="/dashboard"
-                className="inline-flex h-11 items-center gap-2 rounded-xl bg-indigo-600 px-6 text-sm font-semibold text-white shadow-sm transition-all hover:bg-indigo-700 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
-              >
-                Explore Dashboard <ArrowRight className="size-4" />
-              </Link>
-              <Link
-                href="/lowball"
-                className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-6 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-              >
-                Check my offer
-              </Link>
-            </div>
-
-            {/* Highlight pills */}
-            <div className="mt-10 flex flex-wrap gap-5">
-              {highlights.map(({ icon: Icon, label, detail }) => (
-                <div key={label} className="flex items-center gap-2.5">
-                  <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
-                    <Icon className="size-4 text-slate-500 dark:text-slate-400" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">{label}</p>
-                    <p className="text-xs text-slate-400 dark:text-slate-500">{detail}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+        {/* ── Page title ───────────────────────────────────────────────────── */}
+        <section>
+          <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
+            MCF Job Matcher
+          </h1>
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400 leading-relaxed max-w-xl">
+            A set of tools built on live{' '}
+            <a
+              href="https://www.mycareersfuture.gov.sg"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-slate-600 dark:text-slate-400 underline underline-offset-2 hover:text-slate-900 dark:hover:text-slate-200"
+            >
+              MyCareersFuture
+            </a>{' '}
+            data to help you understand the Singapore job market — explore hiring trends,
+            check whether a salary offer is competitive, or match your resume to active roles.
+          </p>
         </section>
 
         {/* ── Tools ────────────────────────────────────────────────────────── */}
