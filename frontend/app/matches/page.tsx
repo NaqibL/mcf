@@ -5,25 +5,25 @@ import dynamic from 'next/dynamic'
 import type { Session } from '@supabase/supabase-js'
 import { profileApi } from '@/lib/api'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
-import AuthGate from './components/AuthGate'
-import { useProfileContext } from './components/ProfileProvider'
-import { RatingsQueueProvider } from './components/RatingsQueueProvider'
-import { Layout } from './components/layout'
-import NavUserActions from './components/NavUserActions'
+import AuthGate from '../components/AuthGate'
+import { useProfileContext } from '../components/ProfileProvider'
+import { RatingsQueueProvider } from '../components/RatingsQueueProvider'
+import { Layout } from '../components/layout'
+import NavUserActions from '../components/NavUserActions'
 import { PageHeader, Card, CardBody, LoadingState } from '@/components/design'
 import { Button } from '@/components/ui/button'
-import { MatchesErrorBoundary } from './MatchesErrorBoundary'
-import Spinner from './components/Spinner'
-import { TutorialModal, getTutorialStep, hasSeenTutorial } from './components/TutorialModal'
+import { MatchesErrorBoundary } from '../MatchesErrorBoundary'
+import Spinner from '../components/Spinner'
+import { TutorialModal, getTutorialStep, hasSeenTutorial } from '../components/TutorialModal'
 import { toast } from 'sonner'
 import { Upload, RefreshCw, FileWarning } from 'lucide-react'
 
-const LazyResumeTab = dynamic(() => import('./components/ResumeTab'), {
+const LazyResumeTab = dynamic(() => import('../components/ResumeTab'), {
   ssr: false,
   loading: () => <LoadingState variant="matches" count={3} />,
 })
 
-const LazyTasteTab = dynamic(() => import('./components/TasteTab'), {
+const LazyTasteTab = dynamic(() => import('../components/TasteTab'), {
   ssr: false,
   loading: () => <LoadingState variant="matches" count={3} />,
 })
