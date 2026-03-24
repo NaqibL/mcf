@@ -78,6 +78,25 @@ def _verify_token(token: str) -> str:
         )
 
 
+def get_optional_user(authorization: Optional[str] = Header(default=None)) -> str | None:
+    """Like get_current_user but returns None instead of raising 401 when unauthenticated.
+
+    Use for endpoints that are publicly accessible but can optionally use a user
+    identity if one is provided (e.g. dashboard analytics, lowball checker).
+    """
+    if not settings.auth_enabled:
+        return settings.default_user_id
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    try:
+        return _verify_token(token)
+    except HTTPException:
+        return None
+
+
 def get_current_user(authorization: Optional[str] = Header(default=None)) -> str:
     """FastAPI dependency that resolves the current user_id.
 

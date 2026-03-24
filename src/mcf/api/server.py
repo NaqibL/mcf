@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-from mcf.api.auth import get_current_user
+from mcf.api.auth import get_current_user, get_optional_user
 from mcf.api.config import settings
 from mcf.api.active_jobs_pool_cache import invalidate as invalidate_active_jobs_pool
 from mcf.api.matches_cache import get_cached, invalidate_user, invalidate_all, set_cached, cache_stats as matches_cache_stats
@@ -326,7 +326,7 @@ def get_dashboard_active_jobs_over_time_public(
 def get_dashboard_jobs_by_category(
     limit_days: int = Query(default=90, ge=1, le=365),
     limit: int = Query(default=30, ge=1, le=50),
-    user_id: str = Depends(get_current_user),
+    _: str | None = Depends(get_optional_user),
 ):
     """Return job counts by MCF category (from job_daily_stats)."""
     store = get_store()
@@ -349,7 +349,7 @@ def get_dashboard_jobs_by_category_public(
 def get_dashboard_category_trends(
     category: str = Query(..., min_length=1),
     limit_days: int = Query(default=90, ge=1, le=365),
-    user_id: str = Depends(get_current_user),
+    _: str | None = Depends(get_optional_user),
 ):
     """Return trend data for a specific category from job_daily_stats."""
     store = get_store()
@@ -360,7 +360,7 @@ def get_dashboard_category_trends(
 @cache_response(TTL_DASHBOARD, "dashboard:category-stats")
 def get_dashboard_category_stats(
     category: str = Query(..., min_length=1),
-    user_id: str = Depends(get_current_user),
+    _: str | None = Depends(get_optional_user),
 ):
     """Return employment type, position level, salary breakdown for a category."""
     store = get_store()
@@ -372,7 +372,7 @@ def get_dashboard_category_stats(
 def get_dashboard_jobs_by_employment_type(
     limit_days: int = Query(default=90, ge=1, le=365),
     limit: int = Query(default=20, ge=1, le=50),
-    user_id: str = Depends(get_current_user),
+    _: str | None = Depends(get_optional_user),
 ):
     """Return job counts by employment type (from job_daily_stats)."""
     store = get_store()
@@ -384,7 +384,7 @@ def get_dashboard_jobs_by_employment_type(
 def get_dashboard_jobs_by_position_level(
     limit_days: int = Query(default=90, ge=1, le=365),
     limit: int = Query(default=20, ge=1, le=50),
-    user_id: str = Depends(get_current_user),
+    _: str | None = Depends(get_optional_user),
 ):
     """Return job counts by position level (from job_daily_stats)."""
     store = get_store()
@@ -393,7 +393,7 @@ def get_dashboard_jobs_by_position_level(
 
 @app.get("/api/dashboard/salary-distribution")
 @cache_response(TTL_DASHBOARD, "dashboard:salary-distribution")
-def get_dashboard_salary_distribution(user_id: str = Depends(get_current_user)):
+def get_dashboard_salary_distribution(_: str | None = Depends(get_optional_user)):
     """Return salary distribution buckets (from jobs.salary_min)."""
     store = get_store()
     return store.get_salary_distribution()
@@ -882,7 +882,7 @@ def cors_check(request: Request):
 
 
 @app.post("/api/lowball/check")
-def check_lowball(body: LowballCheckRequest, user_id: str = Depends(get_current_user)):
+def check_lowball(body: LowballCheckRequest, _: str | None = Depends(get_optional_user)):
     """Check if an offered salary is competitive for a described role."""
     store = get_store()
     embeddings_cache_inst = EmbeddingsCache(store=store) if settings.enable_embeddings_cache else None

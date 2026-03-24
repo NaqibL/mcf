@@ -6,7 +6,7 @@ import { Briefcase, BarChart2, HelpCircle, Bookmark, Scale } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navLinks = [
-  { href: '/', label: 'Resume Matching', icon: Briefcase },
+  { href: '/matches', label: 'Resume Matching', icon: Briefcase },
   { href: '/saved', label: 'Saved Jobs', icon: Bookmark },
   { href: '/dashboard', label: 'Dashboard', icon: BarChart2 },
   { href: '/lowball', label: 'Lowball Checker', icon: Scale },

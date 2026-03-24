@@ -7,7 +7,7 @@ import { Menu, X, Briefcase, BarChart2, HelpCircle, Bookmark } from 'lucide-reac
 import { cn } from '@/lib/utils'
 
 const navLinks = [
-  { href: '/', label: 'Matches', icon: Briefcase },
+  { href: '/matches', label: 'Matches', icon: Briefcase },
   { href: '/saved', label: 'Saved', icon: Bookmark },
   { href: '/dashboard', label: 'Dashboard', icon: BarChart2 },
   { href: '/how-it-works', label: 'How it works', icon: HelpCircle },
