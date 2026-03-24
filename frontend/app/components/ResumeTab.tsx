@@ -170,22 +170,22 @@ export default function ResumeTab() {
         <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div className="flex gap-8">
               <div>
-                <div className="text-2xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                <div key={stats?.interested} className="stat-pop text-2xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
                   {stats?.interested ?? '—'}
                 </div>
                 <div className="text-sm text-slate-500 dark:text-slate-400">Interested</div>
               </div>
               <div>
-                <div className="text-2xl font-semibold tabular-nums text-rose-500 dark:text-rose-400">
+                <div key={stats?.not_interested} className="stat-pop text-2xl font-semibold tabular-nums text-rose-500 dark:text-rose-400">
                   {stats?.not_interested ?? '—'}
                 </div>
                 <div className="text-sm text-slate-500 dark:text-slate-400">Not Interested</div>
               </div>
               <div>
-                <div className="text-2xl font-semibold tabular-nums text-slate-600 dark:text-slate-400">
-                  {stats?.unrated ?? '—'}
+                <div key={stats?.total_rated} className="stat-pop text-2xl font-semibold tabular-nums text-slate-600 dark:text-slate-400">
+                  {stats?.total_rated ?? '—'}
                 </div>
-                <div className="text-sm text-slate-500 dark:text-slate-400">Unrated</div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">Rated</div>
               </div>
             </div>
 

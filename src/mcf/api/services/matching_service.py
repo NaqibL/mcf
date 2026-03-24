@@ -8,9 +8,9 @@ ENABLE_EMBEDDINGS_CACHE=1. TTL: indefinite.
 from __future__ import annotations
 
 import logging
-import secrets
 
 logger = logging.getLogger(__name__)
+
 from datetime import datetime, timezone
 from typing import Any
 
@@ -67,9 +67,9 @@ class MatchingService:
         Use 2k pool: applicants typically apply to ~200 max; 2k gives 10x headroom for filters and Load More."""
         if settings.enable_active_jobs_pool_cache:
             pool = get_pool_or_fetch(self.store)
-            ranked_with_meta = compute_ranked_from_pool(pool, embedding, limit=2000)
+            ranked_with_meta = compute_ranked_from_pool(pool, embedding)  # no cap — all active jobs
         else:
-            ranked_with_meta = self.store.get_active_job_ids_ranked(embedding, limit=2000)
+            ranked_with_meta = self.store.get_active_job_ids_ranked(embedding, limit=50_000)
         if not ranked_with_meta:
             return ("", [])
 
@@ -180,14 +180,6 @@ class MatchingService:
             if not job:
                 continue
             combined_score = scores_by_uuid.get(job_uuid, 0.0)
-            match_id = secrets.token_urlsafe(16)
-            self.store.record_match(
-                match_id=match_id,
-                profile_id=profile_id,
-                job_uuid=job_uuid,
-                similarity_score=combined_score,
-                match_type="candidate_initiated",
-            )
             results.append(
                 {
                     "job_uuid": job_uuid,
@@ -330,14 +322,6 @@ class MatchingService:
             if not job:
                 continue
             combined_score = scores_by_uuid.get(job_uuid, 0.0)
-            match_id = secrets.token_urlsafe(16)
-            self.store.record_match(
-                match_id=match_id,
-                profile_id=profile_id,
-                job_uuid=job_uuid,
-                similarity_score=combined_score,
-                match_type="taste",
-            )
             results.append(
                 {
                     "job_uuid": job_uuid,

@@ -16,7 +16,8 @@
       "Bash(cmd /c \"cd /d C:\\\\\\\\Users\\\\\\\\Luqman\\\\\\\\Desktop\\\\\\\\projects\\\\\\\\careersfuture\\\\\\\\mcf-main && uv run pytest tests/test_smoke.py -v 2>&1\")",
       "Bash(uv.exe run:*)",
       "Bash(~/.local/bin/uv run:*)",
-      "Bash(/c/Users/Luqman/.local/bin/uv run:*)"
+      "Bash(/c/Users/Luqman/.local/bin/uv run:*)",
+      "Bash(grep:*)"
     ]
   }
 }

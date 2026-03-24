@@ -53,6 +53,15 @@ body {
   color: var(--foreground);
 }
 
+@keyframes stat-pop {
+  0% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+.stat-pop {
+  animation: stat-pop 0.25s ease-out;
+  display: inline-block;
+}
+
 /* Ensure inputs always have visible text (light bg, dark text) regardless of dark mode */
 input:not([type="hidden"]):not([type="file"]),
 textarea,

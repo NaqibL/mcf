@@ -58,9 +58,13 @@ def invalidate() -> None:
 def compute_ranked_from_pool(
     pool: list[tuple[str, list[float], datetime | None]],
     query_embedding: list[float],
-    limit: int = 5000,
+    limit: int | None = None,
 ) -> list[tuple[str, float, datetime | None]]:
-    """Compute (job_uuid, cosine_distance, last_seen_at) sorted by distance ASC."""
+    """Compute (job_uuid, cosine_distance, last_seen_at) sorted by distance ASC.
+
+    Returns all jobs when limit is None (default), so the session covers the full
+    active-jobs pool rather than an arbitrary cap.
+    """
     if not pool:
         return []
     query_vec = np.array(query_embedding, dtype=np.float32)
@@ -71,7 +75,7 @@ def compute_ranked_from_pool(
         distance = 1.0 - cosine_sim
         scored.append((uuid, distance, last_seen_at))
     scored.sort(key=lambda x: x[1])
-    return scored[:limit]
+    return scored[:limit] if limit is not None else scored
 
 
 def get_pool_or_fetch(store: Storage) -> list[tuple[str, list[float], datetime | None]]:
