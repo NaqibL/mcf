@@ -2,13 +2,12 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import dynamic from 'next/dynamic'
-import { Database } from 'lucide-react'
+import { Database, BarChart2 } from 'lucide-react'
 import { dashboardApi } from '@/lib/api'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import { Layout } from '../components/layout'
 import NavUserActions from '../components/NavUserActions'
 import {
-  PageHeader,
   Card,
   CardBody,
   EmptyState,
@@ -167,10 +166,22 @@ export function DashboardContent({ initialSummary, initialJobsOverTime }: Dashbo
   return (
     <Layout userSlot={<NavUserActions />}>
       <DashboardErrorBoundary>
-        <PageHeader
-          title="Dashboard"
-          subtitle="Job market analytics and trends"
-          action={
+        {/* ── Page header ──────────────────────────────────────────────────── */}
+        <div className="-mx-4 lg:-mx-8 px-4 lg:px-8 pt-10 pb-10 mb-8 bg-gradient-to-br from-indigo-50/60 via-white to-slate-50 dark:from-indigo-950/15 dark:via-slate-900 dark:to-slate-900 border-b border-slate-200/70 dark:border-slate-800">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex size-11 items-center justify-center rounded-xl bg-indigo-100 dark:bg-indigo-950/50">
+                <BarChart2 className="size-5 text-indigo-600 dark:text-indigo-400" />
+              </div>
+              <div>
+                <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+                  Dashboard
+                </h1>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Job market analytics and trends
+                </p>
+              </div>
+            </div>
             <div className="flex gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-700">
               {TIME_RANGE_OPTIONS.map(({ value, label }) => (
                 <button
@@ -187,8 +198,8 @@ export function DashboardContent({ initialSummary, initialJobsOverTime }: Dashbo
                 </button>
               ))}
             </div>
-          }
-        />
+          </div>
+        </div>
 
         {loading && !hasData ? (
           <LoadingState variant="dashboard" />

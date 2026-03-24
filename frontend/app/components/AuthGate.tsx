@@ -6,7 +6,6 @@ import type { Session } from '@supabase/supabase-js'
 import Link from 'next/link'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import { dashboardApi } from '@/lib/api'
-import Nav from './Nav'
 import Spinner from './Spinner'
 import {
   PageHeader,
@@ -149,7 +148,14 @@ export default function AuthGate({ children }: Props) {
   return (
     <AuthErrorBoundary>
       <div className="min-h-screen flex flex-col">
-        <Nav variant="auth" />
+        <header className="sticky top-0 z-30 flex items-center h-14 px-6 bg-white border-b border-slate-200 dark:bg-slate-900 dark:border-slate-800 shrink-0">
+          <Link
+            href="/"
+            className="text-lg font-semibold text-slate-900 dark:text-slate-100 hover:text-slate-700 dark:hover:text-slate-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 rounded-lg"
+          >
+            MCF
+          </Link>
+        </header>
 
         <div className="flex-1 flex flex-col lg:flex-row">
           {/* Left: Hero + Form */}
