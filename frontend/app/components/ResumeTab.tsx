@@ -167,6 +167,12 @@ export default function ResumeTab() {
   return (
     <div className="space-y-6">
       <Card className="border-slate-200 dark:border-slate-700">
+        <CardBody>
+        <p className="mb-4 rounded-lg bg-violet-50 px-4 py-3 text-sm text-violet-700 dark:bg-violet-900/20 dark:text-violet-300">
+          Top unrated resume matches are shown below (25 at a time). Rate each one to train your taste profile.
+          Once you have enough ratings, click <strong>Update Taste Profile</strong> then use the <strong>Taste</strong> tab
+          for personalised recommendations.
+        </p>
         <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div className="flex gap-8">
               <div>
@@ -218,20 +224,15 @@ export default function ResumeTab() {
               </p>
             )}
           </div>
+        </CardBody>
       </Card>
 
-      <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-        Top unrated resume matches are shown below (25 at a time). Rate each one to train your taste profile.
-        Once you have enough ratings, click <strong>Update Taste Profile</strong> then use the <strong>Taste</strong> tab
-        for personalised recommendations.
-      </p>
-
       <Card className="border-slate-200 dark:border-slate-700">
-        <CardBody className="p-6">
+        <CardBody>
           <div className="flex flex-col gap-6 sm:flex-row sm:flex-wrap sm:items-end">
             <div className="flex-1 min-w-[200px]">
               <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
-                Min Match: <span className="font-semibold text-indigo-600 dark:text-indigo-400">{localFilters.minSimilarity}%</span>
+                Min Match: <span className="font-semibold text-violet-600 dark:text-violet-400">{localFilters.minSimilarity}%</span>
               </label>
               <input
                 type="range"
@@ -240,7 +241,7 @@ export default function ResumeTab() {
                 step={5}
                 value={localFilters.minSimilarity}
                 onChange={(e) => setLocalFilters({ ...localFilters, minSimilarity: parseInt(e.target.value) })}
-                className="w-full accent-indigo-600"
+                className="w-full accent-violet-600"
               />
             </div>
             <div className="w-32">
@@ -260,7 +261,7 @@ export default function ResumeTab() {
                     maxDaysOld: parsed != null && !Number.isNaN(parsed) && parsed > 0 ? parsed : null,
                   })
                 }}
-                className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm transition-colors focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
               />
             </div>
           </div>

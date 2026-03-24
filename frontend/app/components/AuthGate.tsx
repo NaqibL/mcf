@@ -111,6 +111,9 @@ export default function AuthGate({ children }: Props) {
     setLoading(false)
     if (err) {
       setError(err.message)
+    } else {
+      setEmail('')
+      setPassword('')
     }
   }
 

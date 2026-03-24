@@ -11,15 +11,18 @@ import { useCallback, useRef, useEffect } from 'react'
 import { api, revalidateMatches } from './api'
 
 const BATCH_SIZE = 5
-const BATCH_DELAY_MS = 2000
+const BATCH_DELAY_MS = 500
 
 type RatingItem = { jobUuid: string; interactionType: string }
 
 export function useDebouncedRatings(options?: {
   onFlushError?: () => void
+  onFlushSuccess?: () => void
 }) {
   const onFlushErrorRef = useRef(options?.onFlushError)
   onFlushErrorRef.current = options?.onFlushError
+  const onFlushSuccessRef = useRef(options?.onFlushSuccess)
+  onFlushSuccessRef.current = options?.onFlushSuccess
   const queueRef = useRef<RatingItem[]>([])
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const flushInProgressRef = useRef(false)
@@ -45,6 +48,7 @@ export function useDebouncedRatings(options?: {
         ),
       )
       await revalidateMatches()
+      onFlushSuccessRef.current?.()
     } catch {
       onFlushErrorRef.current?.()
     } finally {

@@ -18,7 +18,10 @@ export function RatingsQueueProvider({ children }: { children: ReactNode }) {
     invalidateProfile()
     toast.error('Some ratings may not have been saved. Please refresh.')
   }, [invalidateProfile])
-  const { queueRating, flush } = useDebouncedRatings({ onFlushError })
+  const onFlushSuccess = useCallback(() => {
+    invalidateProfile()
+  }, [invalidateProfile])
+  const { queueRating, flush } = useDebouncedRatings({ onFlushError, onFlushSuccess })
   return (
     <RatingsQueueContext.Provider value={{ queueRating, flush }}>
       {children}
