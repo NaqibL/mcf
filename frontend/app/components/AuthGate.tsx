@@ -156,7 +156,7 @@ export default function AuthGate({ children }: Props) {
           <div className="flex min-h-[60vh] flex-col justify-center px-4 py-8 sm:px-6 sm:py-12 lg:w-[40%] lg:px-8 lg:py-16 bg-gradient-to-br from-slate-50 via-indigo-50/20 to-teal-50/30 dark:from-slate-900 dark:via-indigo-950/20 dark:to-slate-900">
             <PageHeader
               title="Find your next role here"
-              subtitle="Sign in to see matches tailored to your resume."
+              subtitle="Explore the market or sign in to match your resume."
               action={
                 <Link
                   href="/how-it-works"

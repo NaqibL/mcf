@@ -2,10 +2,11 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Briefcase, BarChart2, HelpCircle, Bookmark, Scale } from 'lucide-react'
+import { Briefcase, BarChart2, HelpCircle, Bookmark, Scale, Home } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navLinks = [
+  { href: '/', label: 'Home', icon: Home },
   { href: '/matches', label: 'Resume Matching', icon: Briefcase },
   { href: '/saved', label: 'Saved Jobs', icon: Bookmark },
   { href: '/dashboard', label: 'Dashboard', icon: BarChart2 },

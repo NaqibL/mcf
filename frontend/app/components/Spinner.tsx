@@ -13,7 +13,7 @@ const sizeClasses = {
 }
 
 const variantClasses = {
-  default: 'border-gray-200 border-t-blue-600',
+  default: 'border-slate-200 border-t-indigo-600',
   light: 'border-white/30 border-t-white',
 }
 

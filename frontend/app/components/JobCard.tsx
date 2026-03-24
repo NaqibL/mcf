@@ -73,7 +73,7 @@ export const MatchCard = React.memo(function MatchCard({ match, onInteraction, l
         }`}
       onMouseEnter={handleMouseEnter}
     >
-      <div className="p-5">
+      <div className="p-6">
         <div className="flex items-start justify-between gap-4 mb-4">
           <div className="flex-1 min-w-0">
             <Link

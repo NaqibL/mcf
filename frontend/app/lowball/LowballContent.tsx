@@ -7,6 +7,7 @@ import { Layout } from '../components/layout'
 import NavUserActions from '../components/NavUserActions'
 import { PageHeader, Card, CardBody } from '@/components/design'
 import { Scale, ChevronDown, ChevronUp, ExternalLink, Loader2 } from 'lucide-react'
+import { Input } from '@/components/ui/input'
 
 // ---------------------------------------------------------------------------
 // Salary bar
@@ -24,15 +25,15 @@ function SalaryBar({ offered, p25, p50, p75 }: { offered: number; p25: number; p
       <div className="relative h-6 rounded-full bg-slate-100 dark:bg-slate-800">
         {/* shaded interquartile band */}
         <div
-          className="absolute top-0 h-full rounded-full bg-blue-100 dark:bg-blue-900/40"
+          className="absolute top-0 h-full rounded-full bg-indigo-100 dark:bg-indigo-900/40"
           style={{ left: pct(p25), width: `${Math.round(((p75 - p25) / range) * 100)}%` }}
         />
         {/* p25 marker */}
-        <div className="absolute top-0 h-full w-px bg-blue-400" style={{ left: pct(p25) }} />
+        <div className="absolute top-0 h-full w-px bg-indigo-400" style={{ left: pct(p25) }} />
         {/* p50 marker */}
-        <div className="absolute top-0 h-full w-0.5 bg-blue-600" style={{ left: pct(p50) }} />
+        <div className="absolute top-0 h-full w-0.5 bg-indigo-600" style={{ left: pct(p50) }} />
         {/* p75 marker */}
-        <div className="absolute top-0 h-full w-px bg-blue-400" style={{ left: pct(p75) }} />
+        <div className="absolute top-0 h-full w-px bg-indigo-400" style={{ left: pct(p75) }} />
         {/* offered pin */}
         <div
           className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-white border-2 border-slate-700 dark:border-slate-200 shadow"
@@ -93,7 +94,7 @@ function SimilarJobsTable({ jobs }: { jobs: SimilarJob[] }) {
                         href={j.job_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline truncate"
+                        className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:underline truncate"
                       >
                         {j.title}
                         <ExternalLink className="w-3 h-3 shrink-0" />
@@ -220,7 +221,7 @@ export function LowballContent() {
                   required
                   minLength={50}
                   placeholder="Paste the full job description here…"
-                  className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y"
                 />
               </div>
 
@@ -229,27 +230,25 @@ export function LowballContent() {
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Minimum offered salary <span className="text-slate-400">(SGD/month)</span>
                   </label>
-                  <input
+                  <Input
                     type="number"
                     value={salaryMin}
                     onChange={(e) => setSalaryMin(e.target.value)}
                     required
                     min={100}
                     placeholder="e.g. 5000"
-                    className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Maximum offered salary <span className="text-slate-400">(optional)</span>
                   </label>
-                  <input
+                  <Input
                     type="number"
                     value={salaryMax}
                     onChange={(e) => setSalaryMax(e.target.value)}
                     min={100}
                     placeholder="e.g. 6500"
-                    className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
               </div>
@@ -260,7 +259,7 @@ export function LowballContent() {
 
               <button
                 type="submit"
-                className="flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 text-sm font-medium transition-colors"
+                className="flex items-center gap-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 text-sm font-medium transition-colors"
               >
                 <Scale className="w-4 h-4" />
                 Check salary

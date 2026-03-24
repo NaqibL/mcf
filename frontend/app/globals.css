@@ -62,15 +62,3 @@ body {
   display: inline-block;
 }
 
-/* Ensure inputs always have visible text (light bg, dark text) regardless of dark mode */
-input:not([type="hidden"]):not([type="file"]),
-textarea,
-select {
-  background-color: white !important;
-  color: rgb(15, 23, 42) !important;
-}
-
-input::placeholder,
-textarea::placeholder {
-  color: rgb(148, 163, 184) !important;
-}
