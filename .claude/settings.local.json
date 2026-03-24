@@ -17,7 +17,9 @@
       "Bash(uv.exe run:*)",
       "Bash(~/.local/bin/uv run:*)",
       "Bash(/c/Users/Luqman/.local/bin/uv run:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(find C:UsersLuqmanDesktopprojectscareersfuturemcf-mainfrontend -name *design* -o -name *layout*)",
+      "Bash(npm run:*)"
     ]
   }
 }
