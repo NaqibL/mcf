@@ -33,6 +33,14 @@ _SKILLS_WEIGHT = 0.0
 _RECENCY_DECAY_PER_DAY = 0.005
 _RECENCY_FLOOR = 0.5
 
+# Rocchio query expansion weights.
+# Resume embedding stays dominant (α); liked jobs nudge the query forward (β);
+# disliked jobs push it away (γ). γ < β so negative signal doesn't dominate.
+_ROCCHIO_ALPHA = 0.7
+_ROCCHIO_BETA = 0.3
+_ROCCHIO_GAMMA = 0.1
+_MIN_LIKED_FOR_EXPANSION = 1
+
 
 class MatchingService:
     """Service for matching candidates to jobs and vice versa."""
@@ -125,6 +133,63 @@ class MatchingService:
                 result.append((entry, 0.0))
         return result
 
+    def _expand_query_with_interactions(
+        self,
+        resume_emb: list[float],
+        user_id: str,
+    ) -> list[float]:
+        """Rocchio query expansion: blend resume embedding with liked/disliked job centroids.
+
+        q_opt = α * resume + β * mean(liked) - γ * mean(disliked)
+
+        Falls back to resume_emb unchanged if the user has no liked jobs or
+        embeddings are unavailable. Disliked component is applied independently
+        and only if disliked embeddings are retrievable.
+        """
+        liked_uuids = self.store.get_interested_job_uuids(user_id)
+        if len(liked_uuids) < _MIN_LIKED_FOR_EXPANSION:
+            return resume_emb
+
+        try:
+            liked_pairs = self.store.get_job_embeddings_for_uuids(liked_uuids)
+        except Exception:
+            return resume_emb
+        if not liked_pairs:
+            return resume_emb
+
+        q = np.array(resume_emb, dtype=np.float32)
+
+        # Positive centroid
+        liked_matrix = np.array([emb for _, emb in liked_pairs], dtype=np.float32)
+        liked_mean = liked_matrix.mean(axis=0)
+        norm = float(np.linalg.norm(liked_mean))
+        if norm > 0:
+            liked_mean = liked_mean / norm
+
+        expanded = _ROCCHIO_ALPHA * q + _ROCCHIO_BETA * liked_mean
+
+        # Negative centroid (best-effort — never blocks the positive expansion)
+        try:
+            disliked_uuids = self.store.get_not_interested_job_uuids(user_id)
+            if disliked_uuids:
+                disliked_pairs = self.store.get_job_embeddings_for_uuids(disliked_uuids)
+                if disliked_pairs:
+                    disliked_matrix = np.array([emb for _, emb in disliked_pairs], dtype=np.float32)
+                    disliked_mean = disliked_matrix.mean(axis=0)
+                    dnorm = float(np.linalg.norm(disliked_mean))
+                    if dnorm > 0:
+                        disliked_mean = disliked_mean / dnorm
+                    expanded = expanded - _ROCCHIO_GAMMA * disliked_mean
+        except Exception:
+            pass  # disliked component is optional
+
+        # Re-normalise so cosine similarity math still holds
+        exp_norm = float(np.linalg.norm(expanded))
+        if exp_norm > 0:
+            expanded = expanded / exp_norm
+
+        return expanded.tolist()
+
     def match_candidate_to_jobs(
         self,
         profile_id: str,
@@ -156,8 +221,11 @@ class MatchingService:
                 total = session["total"]
 
         if not ranked_entries:
+            query_emb = candidate_emb
+            if user_id:
+                query_emb = self._expand_query_with_interactions(candidate_emb, user_id)
             session_id, ranked_entries = self._build_session(
-                candidate_emb,
+                query_emb,
                 "resume",
                 user_id or "",
                 exclude_interacted,
