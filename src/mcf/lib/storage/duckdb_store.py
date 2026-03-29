@@ -1059,35 +1059,25 @@ class DuckDBStore(Storage):
 
     def get_dashboard_summary(self) -> dict:
         """Summary for MCF jobs only (excludes CAG)."""
-        mcf_filter = "WHERE (job_source = 'mcf' OR job_source IS NULL)"
+        # Query 1: counts + embeddings in a single LEFT JOIN pass
         row = self._con.execute(
-            f"""
+            """
             SELECT
               COUNT(*) AS total,
-              COUNT(*) FILTER (WHERE is_active = TRUE) AS active,
-              COUNT(*) FILTER (WHERE is_active = FALSE) AS inactive
-            FROM jobs {mcf_filter}
+              COUNT(*) FILTER (WHERE j.is_active = TRUE) AS active,
+              COUNT(*) FILTER (WHERE j.is_active = FALSE) AS inactive,
+              COUNT(e.job_uuid) FILTER (WHERE j.is_active = TRUE) AS with_embeddings
+            FROM jobs j
+            LEFT JOIN job_embeddings e ON e.job_uuid = j.job_uuid
+            WHERE (j.job_source = 'mcf' OR j.job_source IS NULL)
             """
         ).fetchone()
         total = row[0] if row else 0
         active = row[1] if row else 0
         inactive = row[2] if row else 0
+        jobs_with_embeddings = row[3] if row else 0
 
-        row = self._con.execute(
-            f"SELECT COUNT(*) FROM jobs {mcf_filter}"
-        ).fetchone()
-        by_source = {"mcf": row[0] if row else 0}
-
-        row = self._con.execute(
-            """
-            SELECT COUNT(*) FROM jobs j
-            JOIN job_embeddings e ON e.job_uuid = j.job_uuid
-            WHERE j.is_active = TRUE
-              AND (j.job_source = 'mcf' OR j.job_source IS NULL)
-            """
-        ).fetchone()
-        jobs_with_embeddings = row[0] if row else 0
-
+        # Query 2: backfill count
         row = self._con.execute(
             """
             SELECT COUNT(*) FROM jobs
@@ -1102,7 +1092,7 @@ class DuckDBStore(Storage):
             "total_jobs": total,
             "active_jobs": active,
             "inactive_jobs": inactive,
-            "by_source": by_source,
+            "by_source": {"mcf": total},
             "jobs_with_embeddings": jobs_with_embeddings,
             "jobs_needing_backfill": jobs_needing_backfill,
         }
@@ -1299,6 +1289,24 @@ class DuckDBStore(Storage):
         try:
             rows = self._con.execute(
                 """
+                SELECT category, SUM(active_count)::INTEGER AS count
+                FROM job_daily_stats
+                WHERE stat_date = (SELECT MAX(stat_date) FROM job_daily_stats)
+                  AND category != 'Unknown'
+                GROUP BY category
+                ORDER BY count DESC
+                LIMIT ?
+                """,
+                [limit],
+            ).fetchall()
+        except duckdb.ProgrammingError:
+            rows = []
+        if rows:
+            return [{"category": r[0], "count": r[1]} for r in rows]
+        # Fallback to jobs table if job_daily_stats is empty
+        try:
+            rows = self._con.execute(
+                """
                 SELECT
                     COALESCE(
                         NULLIF(TRIM(COALESCE(json_extract_string(categories_json, '$[0]'), '')), ''),
@@ -1370,100 +1378,62 @@ class DuckDBStore(Storage):
         return result
 
     def get_category_stats(self, category: str) -> dict:
-        cat_filter = """
-            AND COALESCE(
-                NULLIF(TRIM(COALESCE(json_extract_string(categories_json, '$[0]'), '')), ''),
-                'Unknown'
-            ) = ?
-        """
-        mcf = "AND (job_source = 'mcf' OR job_source IS NULL)"
         bucket_order = [
             "$0-1k", "$1k-2k", "$2k-3k", "$3k-4k", "$4k-5k",
             "$5k-6k", "$6k-8k", "$8k-10k", "$10k+", "Not disclosed",
         ]
 
         try:
-            row = self._con.execute(
-                f"""
-                SELECT COUNT(*)::INTEGER
-                FROM jobs
-                WHERE is_active = TRUE {mcf} {cat_filter}
-                """,
-                [category],
-            ).fetchone()
-            active_count = row[0] if row else 0
-
+            # Single pass over filtered rows using a MATERIALIZED CTE
             rows = self._con.execute(
-                f"""
-                SELECT
-                    COALESCE(
-                        NULLIF(TRIM(COALESCE(json_extract_string(employment_types_json, '$[0]'), '')), ''),
-                        'Unknown'
-                    ) AS employment_type,
-                    COUNT(*)::INTEGER AS count
-                FROM jobs
-                WHERE is_active = TRUE {mcf} {cat_filter}
-                GROUP BY 1
-                ORDER BY count DESC
-                LIMIT 20
+                """
+                WITH filtered AS MATERIALIZED (
+                    SELECT
+                        COALESCE(NULLIF(TRIM(COALESCE(json_extract_string(employment_types_json, '$[0]'), '')), ''), 'Unknown') AS et,
+                        COALESCE(NULLIF(TRIM(COALESCE(json_extract_string(position_levels_json, '$[0]'), '')), ''), 'Unknown') AS pl,
+                        salary_min
+                    FROM jobs
+                    WHERE is_active = TRUE
+                      AND (job_source = 'mcf' OR job_source IS NULL)
+                      AND COALESCE(NULLIF(TRIM(COALESCE(json_extract_string(categories_json, '$[0]'), '')), ''), 'Unknown') = ?
+                )
+                SELECT 'summary' AS kind, '' AS val,
+                       COUNT(*)::VARCHAR AS a,
+                       COALESCE(ROUND(AVG(salary_min), 0)::INTEGER::VARCHAR, '') AS b
+                FROM filtered
+                UNION ALL
+                SELECT 'et', et, cnt::VARCHAR, ''
+                FROM (
+                    SELECT et, COUNT(*)::INTEGER AS cnt
+                    FROM filtered WHERE et != 'Unknown'
+                    GROUP BY et ORDER BY cnt DESC LIMIT 20
+                )
+                UNION ALL
+                SELECT 'pl', pl, cnt::VARCHAR, ''
+                FROM (
+                    SELECT pl, COUNT(*)::INTEGER AS cnt
+                    FROM filtered WHERE pl != 'Unknown'
+                    GROUP BY pl ORDER BY cnt DESC LIMIT 20
+                )
+                UNION ALL
+                SELECT 'sal',
+                       CASE
+                           WHEN salary_min IS NULL THEN 'Not disclosed'
+                           WHEN salary_min < 1000 THEN '$0-1k'
+                           WHEN salary_min < 2000 THEN '$1k-2k'
+                           WHEN salary_min < 3000 THEN '$2k-3k'
+                           WHEN salary_min < 4000 THEN '$3k-4k'
+                           WHEN salary_min < 5000 THEN '$4k-5k'
+                           WHEN salary_min < 6000 THEN '$5k-6k'
+                           WHEN salary_min < 8000 THEN '$6k-8k'
+                           WHEN salary_min < 10000 THEN '$8k-10k'
+                           ELSE '$10k+'
+                       END,
+                       COUNT(*)::VARCHAR, ''
+                FROM filtered GROUP BY 2
                 """,
                 [category],
             ).fetchall()
-            employment_types = [{"employment_type": r[0], "count": r[1]} for r in rows]
-
-            rows = self._con.execute(
-                f"""
-                SELECT
-                    COALESCE(
-                        NULLIF(TRIM(COALESCE(json_extract_string(position_levels_json, '$[0]'), '')), ''),
-                        'Unknown'
-                    ) AS position_level,
-                    COUNT(*)::INTEGER AS count
-                FROM jobs
-                WHERE is_active = TRUE {mcf} {cat_filter}
-                GROUP BY 1
-                ORDER BY count DESC
-                LIMIT 20
-                """,
-                [category],
-            ).fetchall()
-            position_levels = [{"position_level": r[0], "count": r[1]} for r in rows]
-
-            rows = self._con.execute(
-                f"""
-                SELECT
-                    CASE
-                        WHEN salary_min IS NULL THEN 'Not disclosed'
-                        WHEN salary_min < 1000 THEN '$0-1k'
-                        WHEN salary_min < 2000 THEN '$1k-2k'
-                        WHEN salary_min < 3000 THEN '$2k-3k'
-                        WHEN salary_min < 4000 THEN '$3k-4k'
-                        WHEN salary_min < 5000 THEN '$4k-5k'
-                        WHEN salary_min < 6000 THEN '$5k-6k'
-                        WHEN salary_min < 8000 THEN '$6k-8k'
-                        WHEN salary_min < 10000 THEN '$8k-10k'
-                        ELSE '$10k+'
-                    END AS bucket,
-                    COUNT(*)::INTEGER AS count
-                FROM jobs
-                WHERE is_active = TRUE {mcf} {cat_filter}
-                GROUP BY 1
-                """,
-                [category],
-            ).fetchall()
-            by_bucket = {r[0]: r[1] for r in rows}
-            salary_buckets = [{"bucket": b, "count": by_bucket.get(b, 0)} for b in bucket_order]
-
-            row = self._con.execute(
-                f"""
-                SELECT ROUND(AVG(salary_min), 0)::INTEGER
-                FROM jobs
-                WHERE is_active = TRUE AND salary_min IS NOT NULL {mcf} {cat_filter}
-                """,
-                [category],
-            ).fetchone()
-            avg_salary = row[0] if row and row[0] is not None else None
-
         except duckdb.ProgrammingError:
             return {
                 "active_count": 0,
@@ -1475,6 +1445,24 @@ class DuckDBStore(Storage):
                 "salary_buckets": [],
             }
 
+        active_count = 0
+        avg_salary = None
+        employment_types: list[dict] = []
+        position_levels: list[dict] = []
+        by_bucket: dict[str, int] = {}
+
+        for kind, val, a, b in rows:
+            if kind == "summary":
+                active_count = int(a) if a else 0
+                avg_salary = int(float(b)) if b else None
+            elif kind == "et":
+                employment_types.append({"employment_type": val, "count": int(a)})
+            elif kind == "pl":
+                position_levels.append({"position_level": val, "count": int(a)})
+            elif kind == "sal":
+                by_bucket[val] = int(a)
+
+        salary_buckets = [{"bucket": b, "count": by_bucket.get(b, 0)} for b in bucket_order]
         top_employment_type = employment_types[0]["employment_type"] if employment_types else None
         top_position_level = position_levels[0]["position_level"] if position_levels else None
 
@@ -1489,6 +1477,24 @@ class DuckDBStore(Storage):
         }
 
     def get_jobs_by_employment_type(self, limit_days: int = 90, limit: int = 20) -> list[dict]:
+        try:
+            rows = self._con.execute(
+                """
+                SELECT employment_type, SUM(active_count)::INTEGER AS count
+                FROM job_daily_stats
+                WHERE stat_date = (SELECT MAX(stat_date) FROM job_daily_stats)
+                  AND employment_type != 'Unknown'
+                GROUP BY employment_type
+                ORDER BY count DESC
+                LIMIT ?
+                """,
+                [limit],
+            ).fetchall()
+        except duckdb.ProgrammingError:
+            rows = []
+        if rows:
+            return [{"employment_type": r[0], "count": r[1]} for r in rows]
+        # Fallback to jobs table if job_daily_stats is empty
         try:
             rows = self._con.execute(
                 """
@@ -1512,6 +1518,24 @@ class DuckDBStore(Storage):
         return [{"employment_type": r[0], "count": r[1]} for r in rows]
 
     def get_jobs_by_position_level(self, limit_days: int = 90, limit: int = 20) -> list[dict]:
+        try:
+            rows = self._con.execute(
+                """
+                SELECT position_level, SUM(active_count)::INTEGER AS count
+                FROM job_daily_stats
+                WHERE stat_date = (SELECT MAX(stat_date) FROM job_daily_stats)
+                  AND position_level != 'Unknown'
+                GROUP BY position_level
+                ORDER BY count DESC
+                LIMIT ?
+                """,
+                [limit],
+            ).fetchall()
+        except duckdb.ProgrammingError:
+            rows = []
+        if rows:
+            return [{"position_level": r[0], "count": r[1]} for r in rows]
+        # Fallback to jobs table if job_daily_stats is empty
         try:
             rows = self._con.execute(
                 """

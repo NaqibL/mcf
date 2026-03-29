@@ -98,25 +98,34 @@ export function DashboardContent({ initialSummary, initialJobsOverTime }: Dashbo
 
   const hasRetriedRef = useRef(false)
 
+  // Static chart data (category, employment type, position level, salary) — fetched once,
+  // these don't change with the time range selector.
   useEffect(() => {
-    const load = async (isRetry = false) => {
-      setLoading(true)
+    const load = async () => {
       try {
         if (isSupabaseConfigured) {
           await supabase.auth.getSession()
         }
-        const [ajo, jbc, jbet, jbpl, sd] = await Promise.all([
-          dashboardApi.getActiveJobsOverTime(limitDays),
-          dashboardApi.getJobsByCategory(limitDays, 30),
-          dashboardApi.getJobsByEmploymentType(limitDays, 20),
-          dashboardApi.getJobsByPositionLevel(limitDays, 20),
-          dashboardApi.getSalaryDistribution(),
-        ])
+        const data = await dashboardApi.getChartsStatic()
+        setJobsByCategory((data.jobs_by_category || []).filter((x) => x.category !== 'Unknown'))
+        setJobsByEmploymentType((data.jobs_by_employment_type || []).filter((x) => x.employment_type !== 'Unknown'))
+        setJobsByPositionLevel((data.jobs_by_position_level || []).filter((x) => x.position_level !== 'Unknown'))
+        setSalaryDistribution(data.salary_distribution || [])
+      } catch {
+        // Static data unavailable — charts will remain empty
+      }
+    }
+    load()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Active jobs over time — re-fetched when the time range changes.
+  useEffect(() => {
+    const load = async (isRetry = false) => {
+      setLoading(true)
+      try {
+        const ajo = await dashboardApi.getActiveJobsOverTime(limitDays)
         setActiveJobsOverTime(ajo || [])
-        setJobsByCategory((jbc || []).filter((x) => x.category !== 'Unknown'))
-        setJobsByEmploymentType((jbet || []).filter((x) => x.employment_type !== 'Unknown'))
-        setJobsByPositionLevel((jbpl || []).filter((x) => x.position_level !== 'Unknown'))
-        setSalaryDistribution(sd || [])
         hasRetriedRef.current = false
       } catch (err: unknown) {
         if (!isRetry && !hasRetriedRef.current) {

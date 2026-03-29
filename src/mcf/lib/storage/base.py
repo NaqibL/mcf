@@ -304,6 +304,15 @@ class Storage(ABC):
     @abstractmethod
     def get_salary_distribution(self) -> list[dict]: ...
 
+    def get_charts_static(self, cat_limit: int = 30, et_limit: int = 20, pl_limit: int = 20) -> dict:
+        """Bundle the four time-range-independent chart datasets into a single call."""
+        return {
+            "jobs_by_category": self.get_jobs_by_category(limit=cat_limit),
+            "jobs_by_employment_type": self.get_jobs_by_employment_type(limit=et_limit),
+            "jobs_by_position_level": self.get_jobs_by_position_level(limit=pl_limit),
+            "salary_distribution": self.get_salary_distribution(),
+        }
+
     @abstractmethod
     def get_jobs_with_salary_by_uuids(self, job_uuids: list[str]) -> list[dict]:
         """Return job_uuid, title, company_name, job_url, salary_min, salary_max for given UUIDs."""

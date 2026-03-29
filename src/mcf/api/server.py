@@ -429,6 +429,22 @@ def get_dashboard_salary_distribution_public():
     return store.get_salary_distribution()
 
 
+@app.get("/api/dashboard/charts-static")
+@cache_response(TTL_DASHBOARD, "dashboard:charts-static")
+def get_dashboard_charts_static(_: str | None = Depends(get_optional_user)):
+    """Return all time-range-independent chart data in a single response."""
+    store = get_store()
+    return store.get_charts_static()
+
+
+@app.get("/api/dashboard/charts-static-public")
+@cache_response(TTL_DASHBOARD, "dashboard:charts-static-public")
+def get_dashboard_charts_static_public():
+    """Public endpoint for all static chart data (no auth). Used by Next.js cached route."""
+    store = get_store()
+    return store.get_charts_static()
+
+
 # ---------------------------------------------------------------------------
 # Profile endpoints
 # ---------------------------------------------------------------------------

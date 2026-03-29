@@ -272,6 +272,16 @@ export const dashboardApi = {
     if (!res.ok) throw new Error('Failed to fetch salary distribution')
     return res.json() as Promise<Array<{ bucket: string; count: number }>>
   },
+  getChartsStatic: async () => {
+    const res = await fetch('/api/dashboard/charts-static')
+    if (!res.ok) throw new Error('Failed to fetch static chart data')
+    return res.json() as Promise<{
+      jobs_by_category: Array<{ category: string; count: number }>
+      jobs_by_employment_type: Array<{ employment_type: string; count: number }>
+      jobs_by_position_level: Array<{ position_level: string; count: number }>
+      salary_distribution: Array<{ bucket: string; count: number }>
+    }>
+  },
 }
 
 export const lowballApi = {
