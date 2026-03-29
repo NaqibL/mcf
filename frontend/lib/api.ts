@@ -287,8 +287,7 @@ export const dashboardApi = {
 export const lowballApi = {
   check: async (
     jobDescription: string,
-    salaryMin: number,
-    salaryMax?: number,
+    salary?: number,
     topK = 20,
   ): Promise<LowballResult> => {
     const { data } = await supabase.auth.getSession()
@@ -301,8 +300,7 @@ export const lowballApi = {
       headers,
       body: JSON.stringify({
         job_description: jobDescription,
-        salary_min: salaryMin,
-        salary_max: salaryMax ?? null,
+        salary: salary ?? null,
         top_k: topK,
       }),
     })

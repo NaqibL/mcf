@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 
 // ---------------------------------------------------------------------------
-// Salary bar
+// Salary bar — offered is optional; omit to show market range only
 // ---------------------------------------------------------------------------
 
 function SalaryBar({
@@ -29,13 +29,14 @@ function SalaryBar({
   p50,
   p75,
 }: {
-  offered: number
+  offered?: number
   p25: number
   p50: number
   p75: number
 }) {
-  const low = Math.min(offered, p25) * 0.85
-  const high = Math.max(offered, p75) * 1.15
+  const anchor = offered ?? p50
+  const low = Math.min(anchor, p25) * 0.85
+  const high = Math.max(anchor, p75) * 1.15
   const range = high - low
   const pct = (v: number) => `${Math.round(((v - low) / range) * 100)}%`
 
@@ -49,10 +50,12 @@ function SalaryBar({
         <div className="absolute top-0 h-full w-px bg-indigo-400" style={{ left: pct(p25) }} />
         <div className="absolute top-0 h-full w-0.5 bg-indigo-600" style={{ left: pct(p50) }} />
         <div className="absolute top-0 h-full w-px bg-indigo-400" style={{ left: pct(p75) }} />
-        <div
-          className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-white border-2 border-slate-700 dark:border-slate-200 shadow"
-          style={{ left: pct(offered) }}
-        />
+        {offered != null && (
+          <div
+            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-white border-2 border-slate-700 dark:border-slate-200 shadow"
+            style={{ left: pct(offered) }}
+          />
+        )}
       </div>
       <div
         className="relative mt-1 text-xs text-slate-500 dark:text-slate-400"
@@ -67,12 +70,14 @@ function SalaryBar({
         <span className="absolute -translate-x-1/2" style={{ left: pct(p75) }}>
           P75
         </span>
-        <span
-          className="absolute -translate-x-1/2 font-semibold text-slate-700 dark:text-slate-300"
-          style={{ left: pct(offered) }}
-        >
-          You
-        </span>
+        {offered != null && (
+          <span
+            className="absolute -translate-x-1/2 font-semibold text-slate-700 dark:text-slate-300"
+            style={{ left: pct(offered) }}
+          >
+            You
+          </span>
+        )}
       </div>
     </div>
   )
@@ -149,7 +154,7 @@ function SimilarJobsTable({ jobs }: { jobs: SimilarJob[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// Verdict display
+// Verdict display config
 // ---------------------------------------------------------------------------
 
 const VERDICT_CONFIG = {
@@ -178,6 +183,11 @@ const VERDICT_CONFIG = {
     color: 'text-slate-600 dark:text-slate-400',
     bg: 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700',
   },
+  market_data: {
+    label: 'Pay range for similar roles',
+    color: 'text-indigo-600 dark:text-indigo-400',
+    bg: 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800',
+  },
 }
 
 // ---------------------------------------------------------------------------
@@ -188,20 +198,20 @@ const HOW_IT_WORKS = [
   {
     icon: FileText,
     step: '1',
-    title: 'Paste the job description',
+    title: 'Paste the job title and description',
     detail: 'Include the full JD so we can find the most similar active roles.',
   },
   {
     icon: TrendingUp,
     step: '2',
-    title: 'Enter the offered salary',
-    detail: 'Provide the minimum (and optionally maximum) monthly salary in SGD.',
+    title: 'Optionally enter an offered salary',
+    detail: 'If you have an offer, enter the monthly SGD amount to see where it sits.',
   },
   {
     icon: Search,
     step: '3',
-    title: 'Get your percentile rank',
-    detail: 'We score similar live jobs and show where your offer sits.',
+    title: 'See the market pay range',
+    detail: 'We show P25/P50/P75 from similar live listings, and your percentile if you entered a salary.',
   },
 ]
 
@@ -264,8 +274,7 @@ type PageState = 'form' | 'loading' | 'result'
 export function LowballContent() {
   const [state, setState] = useState<PageState>('form')
   const [jobDesc, setJobDesc] = useState('')
-  const [salaryMin, setSalaryMin] = useState('')
-  const [salaryMax, setSalaryMax] = useState('')
+  const [salary, setSalary] = useState('')
   const [result, setResult] = useState<LowballResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -274,11 +283,8 @@ export function LowballContent() {
     setError(null)
     setState('loading')
     try {
-      const data = await lowballApi.check(
-        jobDesc,
-        parseInt(salaryMin, 10),
-        salaryMax ? parseInt(salaryMax, 10) : undefined,
-      )
+      const salaryValue = salary ? parseInt(salary, 10) : undefined
+      const data = await lowballApi.check(jobDesc, salaryValue)
       setResult(data)
       setState('result')
     } catch (err: unknown) {
@@ -305,12 +311,12 @@ export function LowballContent() {
             <Scale className="size-5 text-violet-600 dark:text-violet-400" />
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
-            Lowball Checker
+            Salary Checker
           </h1>
         </div>
         <p className="text-base text-slate-500 dark:text-slate-400 leading-relaxed max-w-xl">
-          Paste a job description and salary offer to see how it compares to similar active roles
-          in the Singapore market — ranked by percentile.
+          Paste a job title and description to see the market pay range for similar active roles
+          in Singapore. Optionally enter an offered salary to see where it sits.
         </p>
       </div>
 
@@ -323,52 +329,38 @@ export function LowballContent() {
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                    Job description
+                    Job title and description
                   </label>
                   <p className="mb-2 text-xs text-slate-400 dark:text-slate-500">
-                    Paste the full job description for the most accurate results.
+                    Include the job title and full description for the most accurate results.
                   </p>
                   <textarea
                     value={jobDesc}
                     onChange={(e) => setJobDesc(e.target.value)}
                     rows={9}
                     required
-                    minLength={50}
-                    placeholder="Paste the full job description here…"
+                    minLength={20}
+                    placeholder="e.g. Senior Software Engineer — We are looking for…"
                     className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y leading-relaxed"
                   />
                 </div>
 
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                    Offered salary <span className="font-normal text-slate-400">(SGD / month)</span>
+                    Offered salary{' '}
+                    <span className="font-normal text-slate-400">(SGD / month — optional)</span>
                   </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <p className="mb-1 text-xs text-slate-500 dark:text-slate-400">Minimum</p>
-                      <Input
-                        type="number"
-                        value={salaryMin}
-                        onChange={(e) => setSalaryMin(e.target.value)}
-                        required
-                        min={100}
-                        placeholder="e.g. 5000"
-                      />
-                    </div>
-                    <div>
-                      <p className="mb-1 text-xs text-slate-500 dark:text-slate-400">
-                        Maximum{' '}
-                        <span className="text-slate-400 dark:text-slate-500">(optional)</span>
-                      </p>
-                      <Input
-                        type="number"
-                        value={salaryMax}
-                        onChange={(e) => setSalaryMax(e.target.value)}
-                        min={100}
-                        placeholder="e.g. 6500"
-                      />
-                    </div>
-                  </div>
+                  <p className="mb-2 text-xs text-slate-400 dark:text-slate-500">
+                    Enter your offered salary to see how it compares to market rates.
+                  </p>
+                  <Input
+                    type="number"
+                    value={salary}
+                    onChange={(e) => setSalary(e.target.value)}
+                    min={100}
+                    placeholder="e.g. 5000"
+                    className="max-w-xs"
+                  />
                 </div>
 
                 {error && (
@@ -382,7 +374,7 @@ export function LowballContent() {
                   className="flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 text-sm font-semibold transition-all shadow-sm hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
                 >
                   <Scale className="w-4 h-4" />
-                  Check my offer
+                  {salary ? 'Check my offer' : 'Get market rates'}
                 </button>
               </form>
             </CardBody>
@@ -415,22 +407,30 @@ export function LowballContent() {
           result.market_p25 != null &&
           result.market_p50 != null &&
           result.market_p75 != null
+        const hasSalary = result.offered_salary != null
 
         return (
           <div className="space-y-5">
-            {/* Verdict card */}
+            {/* Verdict / market card */}
             <div className={`rounded-2xl border p-6 ${cfg.bg}`}>
               <p className={`text-3xl font-bold tracking-tight ${cfg.color}`}>
                 {cfg.label}
               </p>
 
-              {result.percentile != null && (
+              {hasSalary && result.percentile != null && (
                 <p className="mt-2 text-base text-slate-600 dark:text-slate-400">
-                  Your offered salary ({fmt(result.offered_salary)}/mo) is at the{' '}
+                  Your offered salary ({fmt(result.offered_salary!)}/mo) is at the{' '}
                   <strong className="text-slate-800 dark:text-slate-200">
                     {result.percentile}th percentile
                   </strong>{' '}
                   of {result.total_matched} similar roles
+                </p>
+              )}
+
+              {result.verdict === 'market_data' && !hasSalary && (
+                <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+                  Based on {result.salary_coverage} of {result.total_matched} matched roles with
+                  disclosed salary
                 </p>
               )}
 
@@ -470,7 +470,7 @@ export function LowballContent() {
                     </div>
                   </div>
                   <SalaryBar
-                    offered={result.offered_salary}
+                    offered={hasSalary ? result.offered_salary! : undefined}
                     p25={result.market_p25!}
                     p50={result.market_p50!}
                     p75={result.market_p75!}
@@ -479,11 +479,13 @@ export function LowballContent() {
               )}
             </div>
 
-            {/* Coverage note */}
-            <p className="text-xs text-slate-400 dark:text-slate-500 px-1">
-              Based on {result.salary_coverage} of {result.total_matched} matched jobs with
-              disclosed salary
-            </p>
+            {/* Coverage note — only show separately when salary was provided */}
+            {hasSalary && (
+              <p className="text-xs text-slate-400 dark:text-slate-500 px-1">
+                Based on {result.salary_coverage} of {result.total_matched} matched jobs with
+                disclosed salary
+              </p>
+            )}
 
             {/* Similar jobs */}
             {result.similar_jobs.length > 0 && (
@@ -498,7 +500,7 @@ export function LowballContent() {
               onClick={reset}
               className="rounded-xl border border-slate-200 dark:border-slate-700 px-5 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
             >
-              ← Check another offer
+              ← Check another role
             </button>
           </div>
         )

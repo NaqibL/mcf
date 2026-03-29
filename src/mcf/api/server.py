@@ -149,14 +149,13 @@ def get_store() -> Storage:
 
 class LowballCheckRequest(BaseModel):
     job_description: str
-    salary_min: int
-    salary_max: int | None = None
+    salary: int | None = None  # single optional salary value (SGD/month)
     top_k: int = 20
 
 
 class LowballResult(BaseModel):
-    verdict: str  # "lowballed"|"below_median"|"at_median"|"above_median"|"insufficient_data"
-    offered_salary: int
+    verdict: str  # "lowballed"|"below_median"|"at_median"|"above_median"|"insufficient_data"|"market_data"
+    offered_salary: int | None  # None when no salary was provided
     percentile: float | None
     market_p25: int | None
     market_p50: int | None
@@ -917,18 +916,31 @@ def check_lowball(body: LowballCheckRequest, _: str | None = Depends(get_optiona
 
     jobs = store.get_jobs_with_salary_by_uuids(list(uuid_to_score.keys()))
     salary_jobs = [j for j in jobs if j.get("salary_min") is not None]
-    offered = body.salary_min if body.salary_max is None else (body.salary_min + body.salary_max) // 2
+    similar = _build_similar_jobs(jobs[:body.top_k], uuid_to_score)
 
+    # Compute market percentiles regardless of whether salary was provided
     if len(salary_jobs) < 5:
         return LowballResult(
-            verdict="insufficient_data", offered_salary=offered,
+            verdict="insufficient_data", offered_salary=body.salary,
             percentile=None, market_p25=None, market_p50=None, market_p75=None,
             salary_coverage=len(salary_jobs), total_matched=len(jobs),
-            similar_jobs=_build_similar_jobs(jobs[:body.top_k], uuid_to_score),
+            similar_jobs=similar,
         )
 
     salaries = sorted(j["salary_min"] for j in salary_jobs)
     p25, p50, p75 = _salary_percentiles(salaries)
+
+    # No salary provided — return market data only
+    if body.salary is None:
+        return LowballResult(
+            verdict="market_data", offered_salary=None,
+            percentile=None, market_p25=p25, market_p50=p50, market_p75=p75,
+            salary_coverage=len(salary_jobs), total_matched=len(jobs),
+            similar_jobs=similar,
+        )
+
+    # Salary provided — compute verdict and percentile
+    offered = body.salary
     percentile = round(sum(1 for s in salaries if s <= offered) / len(salaries) * 100, 1)
 
     if offered < p25:
@@ -944,5 +956,5 @@ def check_lowball(body: LowballCheckRequest, _: str | None = Depends(get_optiona
         verdict=verdict, offered_salary=offered, percentile=percentile,
         market_p25=p25, market_p50=p50, market_p75=p75,
         salary_coverage=len(salary_jobs), total_matched=len(jobs),
-        similar_jobs=_build_similar_jobs(jobs[:body.top_k], uuid_to_score),
+        similar_jobs=similar,
     )

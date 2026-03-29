@@ -71,8 +71,8 @@ export interface SimilarJob {
 }
 
 export interface LowballResult {
-  verdict: 'lowballed' | 'below_median' | 'at_median' | 'above_median' | 'insufficient_data'
-  offered_salary: number
+  verdict: 'lowballed' | 'below_median' | 'at_median' | 'above_median' | 'insufficient_data' | 'market_data'
+  offered_salary: number | null
   percentile: number | null
   market_p25: number | null
   market_p50: number | null
