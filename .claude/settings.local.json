@@ -26,7 +26,9 @@
       "Bash(find /c/Users/Luqman/Desktop/projects/careersfuture/mcf-main/frontend -name *.tsx -o -name *.ts)",
       "Bash(sed -n '155,175p' \"/c/Users/Luqman/Desktop/projects/careersfuture/mcf-main/src/mcf/lib/pipeline/incremental_crawl.py\")",
       "Bash(sed -n '367,420p' \"/c/Users/Luqman/Desktop/projects/careersfuture/mcf-main/src/mcf/lib/storage/postgres_store.py\")",
-      "Bash(jobs -l)"
+      "Bash(jobs -l)",
+      "Bash(sed -n '187,230p' \"/c/Users/Luqman/Desktop/projects/careersfuture/mcf-main/src/mcf/lib/storage/postgres_store.py\")",
+      "Bash(sed -n '1195,1220p' \"/c/Users/Luqman/Desktop/projects/careersfuture/mcf-main/src/mcf/lib/storage/postgres_store.py\")"
     ]
   }
 }

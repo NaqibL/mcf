@@ -192,9 +192,9 @@ class PostgresStore(Storage):
         maintained: Iterable[str],
         removed: Iterable[str],
     ) -> None:
+        # Only store added/removed — maintained is ~70k rows/day and never queried.
         rows: list[tuple[str, str, str]] = []
         rows.extend((run_id, uuid, "added") for uuid in added)
-        rows.extend((run_id, uuid, "maintained") for uuid in maintained)
         rows.extend((run_id, uuid, "removed") for uuid in removed)
         if not rows:
             return
