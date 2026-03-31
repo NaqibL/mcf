@@ -370,9 +370,11 @@ class PostgresStore(Storage):
         now = _utcnow()
         emb_list = [float(x) for x in embedding]
         emb_str = json.dumps(emb_list)
+        _, has_vector = self._job_embedding_schema()
+        has_json = self._job_emb_select == "e.embedding_json"
         with self._cur() as cur:
-            # Try with pgvector column first (after 001_add_pgvector migration)
-            try:
+            if has_vector and has_json:
+                # Both columns exist
                 cur.execute(
                     """
                     INSERT INTO job_embeddings(job_uuid, model_name, embedding_json, embedding, dim, embedded_at)
@@ -386,23 +388,34 @@ class PostgresStore(Storage):
                     """,
                     [job_uuid, model_name, emb_str, emb_str, len(emb_list), now],
                 )
-            except psycopg2.ProgrammingError as e:
-                if "embedding" in str(e) or "column" in str(e).lower():
-                    # pgvector migration not run yet — use json only
-                    cur.execute(
-                        """
-                        INSERT INTO job_embeddings(job_uuid, model_name, embedding_json, dim, embedded_at)
-                        VALUES (%s, %s, %s, %s, %s)
-                        ON CONFLICT (job_uuid) DO UPDATE SET
-                          model_name     = EXCLUDED.model_name,
-                          embedding_json = EXCLUDED.embedding_json,
-                          dim            = EXCLUDED.dim,
-                          embedded_at    = EXCLUDED.embedded_at
-                        """,
-                        [job_uuid, model_name, emb_str, len(emb_list), now],
-                    )
-                else:
-                    raise
+            elif has_vector:
+                # pgvector only (no embedding_json column)
+                cur.execute(
+                    """
+                    INSERT INTO job_embeddings(job_uuid, model_name, embedding, dim, embedded_at)
+                    VALUES (%s, %s, %s::vector, %s, %s)
+                    ON CONFLICT (job_uuid) DO UPDATE SET
+                      model_name  = EXCLUDED.model_name,
+                      embedding   = EXCLUDED.embedding,
+                      dim         = EXCLUDED.dim,
+                      embedded_at = EXCLUDED.embedded_at
+                    """,
+                    [job_uuid, model_name, emb_str, len(emb_list), now],
+                )
+            else:
+                # json only (pre-pgvector migration)
+                cur.execute(
+                    """
+                    INSERT INTO job_embeddings(job_uuid, model_name, embedding_json, dim, embedded_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (job_uuid) DO UPDATE SET
+                      model_name     = EXCLUDED.model_name,
+                      embedding_json = EXCLUDED.embedding_json,
+                      dim            = EXCLUDED.dim,
+                      embedded_at    = EXCLUDED.embedded_at
+                    """,
+                    [job_uuid, model_name, emb_str, len(emb_list), now],
+                )
 
     def get_active_job_embeddings(
         self,
