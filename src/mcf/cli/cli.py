@@ -21,6 +21,7 @@ from mcf.lib.api.client import MCFAPIError
 from mcf.lib.crawler.crawler import CrawlProgress
 from mcf.lib.embeddings.embedder import Embedder, EmbedderConfig
 from mcf.lib.embeddings.embeddings_cache import EmbeddingsCache
+from mcf.lib.embeddings.job_text import build_job_text_from_dict
 from mcf.lib.embeddings.resume import extract_resume_text, preprocess_resume_text
 from mcf.lib.pipeline.incremental_crawl import run_incremental_crawl
 from mcf.lib.sources.cag_source import CareersGovJobSource
@@ -637,7 +638,7 @@ def re_embed(
         console.print(f"[bold cyan]Re-embedding Jobs[/bold cyan]")
         console.print(f"  Database: [green]{db_display}[/green]")
         console.print(f"  Active jobs: [yellow]{len(all_jobs):,}[/yellow]")
-        console.print(f"  Model: [green]BAAI/bge-small-en-v1.5[/green]")
+        console.print(f"  Model: [green]{EmbedderConfig().model_name}[/green]")
         console.print(f"  Batch size: [yellow]{batch_size}[/yellow]")
         console.print()
 
@@ -662,14 +663,9 @@ def re_embed(
             embedded = 0
 
             for job in all_jobs:
-                # Build text from stored fields (title + skills).
+                # Build text from stored fields (title, skills, seniority).
                 # Description is not stored, so we use what we have.
-                parts: list[str] = []
-                if job["title"]:
-                    parts.append(f"Job Title: {job['title']}")
-                if job["skills"]:
-                    parts.append(f"Required Skills: {', '.join(job['skills'])}")
-                job_text = "\n".join(parts) if parts else job["title"] or ""
+                job_text = build_job_text_from_dict(job)
 
                 if not job_text:
                     progress.advance(task)

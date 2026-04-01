@@ -18,11 +18,12 @@ _BGE_QUERY_PREFIX = "Represent this resume for job search: "
 
 @dataclass(frozen=True)
 class EmbedderConfig:
-    # BAAI/bge-small-en-v1.5 is a retrieval-optimised model:
-    #   • 512 token limit  (vs 256 for all-MiniLM-L6-v2)
-    #   • same 384 dimensions  → no DB schema change needed
+    # BAAI/bge-base-en-v1.5 is a retrieval-optimised model:
+    #   • 512 token limit
+    #   • 768 dimensions  (upgraded from 384 / bge-small-en-v1.5)
     #   • asymmetric query/passage design  → better for job matching
-    model_name: str = "BAAI/bge-small-en-v1.5"
+    #   • MTEB retrieval NDCG@10: 53.3 vs 51.7 for small (~3% improvement)
+    model_name: str = "BAAI/bge-base-en-v1.5"
     batch_size: int = 32
 
 

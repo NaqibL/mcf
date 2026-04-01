@@ -25,3 +25,8 @@ debug-*.log
 
 # IDE
 .cursor/
+
+# Notebook analysis outputs (local only, not for git)
+notebooks/*.png
+notebooks/.ipynb_checkpoints/
+notebooks/experience_clustering.ipynb

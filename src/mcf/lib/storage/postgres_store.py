@@ -615,13 +615,18 @@ class PostgresStore(Storage):
 
     def get_all_active_jobs(self) -> list[dict]:
         with self._cur() as cur:
-            cur.execute("SELECT job_uuid, title, skills_json FROM jobs WHERE is_active = TRUE")
+            cur.execute(
+                "SELECT job_uuid, title, skills_json, position_levels_json, min_years_experience"
+                " FROM jobs WHERE is_active = TRUE"
+            )
             rows = cur.fetchall()
         return [
             {
                 "job_uuid": r[0],
                 "title": r[1] or "",
                 "skills": json.loads(r[2]) if r[2] else [],
+                "position_levels": json.loads(r[3]) if r[3] else [],
+                "min_years_experience": r[4],
             }
             for r in rows
         ]

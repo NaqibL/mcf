@@ -634,17 +634,21 @@ class DuckDBStore(Storage):
     def get_all_active_jobs(self) -> list[dict]:
         """Get all active jobs with stored metadata (for re-embedding).
 
-        Returns a list of dicts with: job_uuid, title, skills (list[str]).
+        Returns a list of dicts with: job_uuid, title, skills (list[str]),
+        position_levels (list[str]), min_years_experience (int | None).
         """
         rows = self._con.execute(
-            "SELECT job_uuid, title, skills_json FROM jobs WHERE is_active = TRUE"
+            "SELECT job_uuid, title, skills_json, position_levels_json, min_years_experience"
+            " FROM jobs WHERE is_active = TRUE"
         ).fetchall()
         result = []
-        for uuid, title, skills_json in rows:
+        for uuid, title, skills_json, position_levels_json, min_years_exp in rows:
             result.append({
                 "job_uuid": uuid,
                 "title": title or "",
                 "skills": json.loads(skills_json) if skills_json else [],
+                "position_levels": json.loads(position_levels_json) if position_levels_json else [],
+                "min_years_experience": min_years_exp,
             })
         return result
 

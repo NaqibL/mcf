@@ -28,7 +28,15 @@
       "Bash(sed -n '367,420p' \"/c/Users/Luqman/Desktop/projects/careersfuture/mcf-main/src/mcf/lib/storage/postgres_store.py\")",
       "Bash(jobs -l)",
       "Bash(sed -n '187,230p' \"/c/Users/Luqman/Desktop/projects/careersfuture/mcf-main/src/mcf/lib/storage/postgres_store.py\")",
-      "Bash(sed -n '1195,1220p' \"/c/Users/Luqman/Desktop/projects/careersfuture/mcf-main/src/mcf/lib/storage/postgres_store.py\")"
+      "Bash(sed -n '1195,1220p' \"/c/Users/Luqman/Desktop/projects/careersfuture/mcf-main/src/mcf/lib/storage/postgres_store.py\")",
+      "Bash(sed -n '420,470p' \"/c/Users/Luqman/Desktop/projects/careersfuture/mcf-main/src/mcf/lib/storage/postgres_store.py\")",
+      "Bash(sed -n '510,560p' \"/c/Users/Luqman/Desktop/projects/careersfuture/mcf-main/src/mcf/lib/storage/postgres_store.py\")",
+      "Bash(sed -n '905,920p' \"/c/Users/Luqman/Desktop/projects/careersfuture/mcf-main/src/mcf/api/server.py\")",
+      "Bash(sed -n '70,90p' \"/c/Users/Luqman/Desktop/projects/careersfuture/mcf-main/src/mcf/api/services/matching_service.py\")",
+      "Bash(uv add:*)",
+      "Bash(uv run python -c \":*)",
+      "Bash(python -c \":*)",
+      "WebSearch"
     ]
   }
 }

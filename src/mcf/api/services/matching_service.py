@@ -325,7 +325,7 @@ class MatchingService:
         else:
             taste_vec = positive_mean.tolist()
 
-        model_name = self.store.get_embedding_model_name() or "BAAI/bge-small-en-v1.5"
+        model_name = self.store.get_embedding_model_name() or "BAAI/bge-base-en-v1.5"
 
         self.store.upsert_taste_embedding(
             profile_id=profile_id,
