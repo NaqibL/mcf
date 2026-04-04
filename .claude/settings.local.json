@@ -37,7 +37,12 @@
       "Bash(uv run python -c \":*)",
       "Bash(python -c \":*)",
       "WebSearch",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(uv lock:*)"
     ]
   }
 }
