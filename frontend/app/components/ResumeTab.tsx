@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { matchesApi, profileApi } from '@/lib/api'
+import { matchesApi, profileApi, taxonomyApi } from '@/lib/api'
 import { prefetchJobDetailsTopN } from '@/lib/job-prefetch'
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue'
 import { useProfileContext } from './ProfileProvider'
@@ -22,9 +22,18 @@ import { TutorialModal, getTutorialStep, hasSeenTutorial } from './TutorialModal
 
 const JOBS_PER_PAGE = 25
 
+const TIER_OPTIONS = [
+  { value: 'T1_Entry', label: 'Entry Level' },
+  { value: 'T2_Junior', label: 'Junior' },
+  { value: 'T3_Senior', label: 'Senior' },
+  { value: 'T4_Management', label: 'Management' },
+]
+
 interface Filters {
   minSimilarity: number
   maxDaysOld: number | null
+  roleClusters: number[]
+  predictedTiers: string[]
 }
 
 export default function ResumeTab() {
@@ -32,13 +41,19 @@ export default function ResumeTab() {
   const { queueRating } = useRatingsQueue()
   const stats = profile?.stats ?? null
   const [jobs, setJobs] = useState<Match[]>([])
+  const [candidateTier, setCandidateTier] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [computing, setComputing] = useState(false)
   const [ratingUuids, setRatingUuids] = useState<Set<string>>(new Set())
-  const [localFilters, setLocalFilters] = useState<Filters>({ minSimilarity: 0, maxDaysOld: null })
+  const [localFilters, setLocalFilters] = useState<Filters>({ minSimilarity: 0, maxDaysOld: null, roleClusters: [], predictedTiers: [] })
   const debouncedFilters = useDebouncedValue(localFilters, 300)
+  const [roleTaxonomy, setRoleTaxonomy] = useState<Array<{ id: number; name: string }>>([])
+
+  useEffect(() => {
+    taxonomyApi.getClusters().then(setRoleTaxonomy).catch(() => {})
+  }, [])
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [sessionOffset, setSessionOffset] = useState(0)
   const [showTutorialStep3, setShowTutorialStep3] = useState(false)
@@ -80,12 +95,15 @@ export default function ResumeTab() {
           debouncedFilters.maxDaysOld ?? undefined,
           true,
           append ? (sid ?? undefined) : undefined,
+          debouncedFilters.roleClusters.length > 0 ? debouncedFilters.roleClusters : undefined,
+          debouncedFilters.predictedTiers.length > 0 ? debouncedFilters.predictedTiers : undefined,
         )
         if (!append) {
           sessionRef.current = { sessionId: data.session_id, sessionOffset: JOBS_PER_PAGE }
           setSessionId(data.session_id)
           setSessionOffset(JOBS_PER_PAGE)
           setJobs(data.matches)
+          if (data.candidate_tier) setCandidateTier(data.candidate_tier)
           prefetchJobDetailsTopN(data.matches.map((m) => m.job_uuid), 10)
         } else {
           sessionRef.current = { ...sessionRef.current, sessionOffset: off + JOBS_PER_PAGE }
@@ -100,7 +118,7 @@ export default function ResumeTab() {
         setLoadingMore(false)
       }
     },
-    [debouncedFilters.minSimilarity, debouncedFilters.maxDaysOld],
+    [debouncedFilters.minSimilarity, debouncedFilters.maxDaysOld, debouncedFilters.roleClusters, debouncedFilters.predictedTiers],
   )
 
   useEffect(() => {
@@ -193,6 +211,14 @@ export default function ResumeTab() {
                 </div>
                 <div className="text-sm text-slate-500 dark:text-slate-400">Rated</div>
               </div>
+              {candidateTier && (
+                <div>
+                  <div className="text-sm font-semibold text-indigo-600 dark:text-indigo-400">
+                    {candidateTier.replace('T1_', '').replace('T2_', '').replace('T3_', '').replace('T4_', '')}
+                  </div>
+                  <div className="text-sm text-slate-500 dark:text-slate-400">Your Level</div>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -265,6 +291,86 @@ export default function ResumeTab() {
               />
             </div>
           </div>
+
+          <div className="mt-6 flex flex-col gap-4 border-t border-slate-100 pt-5 dark:border-slate-700 sm:flex-row sm:gap-6">
+              <div className="flex-1">
+                <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Role Category
+                  {localFilters.roleClusters.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setLocalFilters({ ...localFilters, roleClusters: [] })}
+                      className="ml-2 text-xs font-normal text-violet-500 hover:text-violet-700"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {roleTaxonomy.map(({ id, name }) => {
+                    const selected = localFilters.roleClusters.includes(id)
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => {
+                          const next = selected
+                            ? localFilters.roleClusters.filter((c) => c !== id)
+                            : [...localFilters.roleClusters, id]
+                          setLocalFilters({ ...localFilters, roleClusters: next })
+                        }}
+                        className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                          selected
+                            ? 'bg-violet-600 text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600'
+                        }`}
+                      >
+                        {name}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="sm:w-48">
+                <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Experience Level
+                  {localFilters.predictedTiers.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setLocalFilters({ ...localFilters, predictedTiers: [] })}
+                      className="ml-2 text-xs font-normal text-violet-500 hover:text-violet-700"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {TIER_OPTIONS.map(({ value, label }) => {
+                    const selected = localFilters.predictedTiers.includes(value)
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => {
+                          const next = selected
+                            ? localFilters.predictedTiers.filter((t) => t !== value)
+                            : [...localFilters.predictedTiers, value]
+                          setLocalFilters({ ...localFilters, predictedTiers: next })
+                        }}
+                        className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                          selected
+                            ? 'bg-violet-600 text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
         </CardBody>
       </Card>
 

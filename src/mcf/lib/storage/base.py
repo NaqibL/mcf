@@ -122,6 +122,30 @@ class Storage(ABC):
     @abstractmethod
     def get_active_job_count(self) -> int: ...
 
+    # === Job classifications ===
+
+    @abstractmethod
+    def batch_upsert_job_classifications(
+        self, classifications: list[tuple[str, int, str]]
+    ) -> None:
+        """Persist role_cluster and predicted_tier for a batch of jobs.
+
+        Args:
+            classifications: list of (job_uuid, role_cluster, predicted_tier)
+        """
+        ...
+
+    def batch_upsert_multi_label_clusters(
+        self, data: list[tuple[str, list[int]]]
+    ) -> None:
+        """Persist role_clusters_json (multi-label) for a batch of jobs.
+
+        Args:
+            data: list of (job_uuid, cluster_ids) where cluster_ids is
+                  all cluster IDs at cosine >= 0.85 threshold.
+        """
+        raise NotImplementedError
+
     # === Job embeddings ===
 
     @abstractmethod
@@ -167,6 +191,15 @@ class Storage(ABC):
     def get_jobs_by_uuids(self, uuids: list[str]) -> list[dict]:
         """Return full job dicts for each uuid; output order matches input order."""
         ...
+
+    def get_job_uuids_for_filter(
+        self,
+        role_clusters: list[int] | None = None,
+        predicted_tiers: list[str] | None = None,
+    ) -> set[str] | None:
+        """Return set of active job UUIDs matching the given role/tier filters.
+        Returns None if no filters are specified (caller should skip filtering)."""
+        raise NotImplementedError
 
     @abstractmethod
     def create_match_session(

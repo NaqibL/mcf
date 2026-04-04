@@ -658,6 +658,19 @@ def compute_taste(user_id: str = Depends(get_current_user)):
     return result
 
 
+@app.get("/api/jobs/taxonomy")
+def get_job_taxonomy():
+    """Return role cluster taxonomy: list of {id, name} sorted by id."""
+    import mcf.lib.classifiers as _cls
+    _cls._load()
+    return {
+        "clusters": [
+            {"id": k, "name": v}
+            for k, v in sorted((_cls._taxonomy or {}).items())
+        ]
+    }
+
+
 @app.get("/api/matches")
 @cache_response(TTL_MATCHES, "matches")
 def get_matches(
@@ -669,6 +682,8 @@ def get_matches(
     max_days_old: int | None = None,
     mode: str = "resume",
     session_id: str | None = None,
+    role_cluster: list[int] = Query(default=[]),
+    predicted_tier: list[str] = Query(default=[]),
     user_id: str = Depends(get_current_user),
 ):
     """Get job matches for the current user.
@@ -711,6 +726,7 @@ def get_matches(
     profile_id = profile["profile_id"]
     svc = MatchingService(store)
 
+    candidate_tier: str | None = None
     if mode == "taste":
         taste_emb = store.get_taste_embedding(profile_id)
         if not taste_emb:
@@ -730,10 +746,12 @@ def get_matches(
             min_similarity=min_similarity,
             max_days_old=max_days_old,
             session_id=session_id,
+            role_clusters=role_cluster or None,
+            predicted_tiers=predicted_tier or None,
         )
     else:
         # exclude_rated_only: only interested/not_interested (Discover). Else all interactions.
-        matches, total, new_session_id = svc.match_candidate_to_jobs(
+        matches, total, new_session_id, candidate_tier = svc.match_candidate_to_jobs(
             profile_id=profile_id,
             top_k=top_k,
             offset=offset,
@@ -743,6 +761,8 @@ def get_matches(
             min_similarity=min_similarity,
             max_days_old=max_days_old,
             session_id=session_id,
+            role_clusters=role_cluster or None,
+            predicted_tiers=predicted_tier or None,
         )
 
     has_more = offset + len(matches) < total
@@ -752,6 +772,7 @@ def get_matches(
         "has_more": has_more,
         "mode": mode,
         "session_id": new_session_id,
+        "candidate_tier": candidate_tier,
     }
     if settings.enable_matches_cache:
         set_cached(

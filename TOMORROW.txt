@@ -1,0 +1,179 @@
+SESSION RECAP — 2026-04-04
+==========================
+
+What we did today:
+- Confirmed the BGE-base upgrade (768-dim + seniority text in embeddings) was a big win
+- Ran experience tier clustering analysis (v2) — KNN accuracy doubled vs old model
+- Discovered role/job-title cluster structure in the embedding space
+- Validated k=35 as the right cluster count via 5-seed sweep
+- Manually cleaned and named all 35 role clusters
+- Implemented role cluster + experience tier classification into the DB and crawl pipeline
+
+
+MANUAL STEPS (do these first)
+==============================
+
+1. Apply migration 009 to Supabase
+   - Go to Supabase SQL editor
+   - Run: scripts/migrations/009_add_job_classifications.sql
+   - This adds role_cluster (INT) and predicted_tier (TEXT) columns to the jobs table
+   - Also creates indexes on both columns
+
+2. Run the backfill script to classify existing 69k jobs
+   - In terminal: uv run python scripts/backfill_classifications.py
+   - Takes ~2-5 min, prints progress
+   - Only needs to run once — classifies all jobs where role_cluster IS NULL
+   - After this, every future crawl automatically classifies new jobs
+
+
+WHAT WAS IMPLEMENTED THIS SESSION
+===================================
+
+Models (src/mcf/models/):
+  - kmeans_role_v1.pkl       K-Means 35-cluster role model (378 kB)
+  - lr_tier_v1.pkl           LogisticRegression tier classifier (25 kB)
+                             Accuracy: 0.875 balanced (vs 0.698 for KNN, and it's 8000x smaller)
+  - role_taxonomy.json       Cluster ID (0-34) -> role name mapping
+
+New module:
+  - src/mcf/lib/classifiers.py
+    classify_jobs(embeddings) -> list of (role_cluster_id, predicted_tier)
+    role_name(cluster_id) -> human-readable name
+    Models loaded lazily, cached for process lifetime
+
+DB schema:
+  - scripts/migrations/009_add_job_classifications.sql  (apply to Supabase — see step 1 above)
+  - scripts/schema.sql updated for DuckDB local dev
+
+Storage layer:
+  - base.py: added batch_upsert_job_classifications(list[(job_uuid, role_cluster, tier)])
+  - postgres_store.py: implemented (execute_batch, 500-row pages)
+  - duckdb_store.py: implemented (executemany)
+
+Crawl pipeline (incremental_crawl.py):
+  - Phase 3 added after embedding: classifies all new jobs in one batch
+  - Silent on failure (non-blocking — crawl still completes if classifier errors)
+  - Adds ~0.5ms overhead per crawl (negligible)
+
+Backfill:
+  - scripts/backfill_classifications.py  (run once — see step 2 above)
+
+Analysis notebooks/scripts (for reference, not needed in prod):
+  - notebooks/experience_clustering_v2.ipynb  — tier structure analysis
+  - scripts/run_clustering_v2.py              — ran the tier analysis
+  - scripts/run_role_clustering.py            — ran the role cluster discovery
+  - scripts/run_k_validation.py               — validated k=35 with 5-seed sweep
+  - data/analysis_v2/                         — cached embeddings, UMAP coords, models
+  - data/analysis_roles/                      — role cluster profiles, similarity matrix
+
+
+THE 35 ROLE CLUSTERS (for reference)
+======================================
+
+C00  Drivers & Delivery              n=1,586  sal=$2,600
+C01  Construction Project Management n=3,562  sal=$4,500
+C02  Retail & Store Operations       n=1,354  sal=$2,500
+C03  Healthcare Support & Clinic     n=2,252  sal=$2,500
+C04  Admin & Secretarial             n=3,361  sal=$2,500
+C05  Marketing & Digital Marketing   n=3,814  sal=$3,000
+C06  Finance & Legal                 n=3,326  sal=$5,000
+C07  Quantity Surveying              n=1,050  sal=$3,500
+C08  Construction Coordination       n=  992  sal=$3,200
+C09  F&B Service                     n=1,485  sal=$2,200
+C10  Site Supervision                n=1,385  sal=$3,200
+C11  General Management              n=2,844  sal=$3,500
+C12  Beauty & Wellness               n=1,220  sal=$3,000
+C13  Kitchen & Culinary (Junior)     n=1,228  sal=$3,000
+C14  Business Development & Strategy n=3,160  sal=$6,000
+C15  Accounting & Finance Operations n=2,530  sal=$3,000
+C16  Operations & Customer Service   n=2,627  sal=$3,000
+C17  Data Science & Research         n=  922  sal=$5,000
+C18  Human Resources                 n=1,734  sal=$3,000
+C19  Software Development            n=1,220  sal=$6,000
+C20  Nursing & Allied Health         n=1,915  sal=$3,500
+C21  F&B Management                  n=1,382  sal=$3,000
+C22  Sales                           n=4,190  sal=$3,000
+C23  Technician & Maintenance        n=1,976  sal=$2,500
+C24  Cleaning & Facilities           n=  683  sal=$2,000
+C25  Mechanical & Manufacturing Eng  n=2,375  sal=$3,500
+C26  IT Infrastructure & Support     n=1,625  sal=$4,000
+C27  Data Engineering & Cloud / AI   n=1,248  sal=$7,000  <-- highest paid
+C28  Kitchen & Culinary (Senior)     n=  983  sal=$3,000
+C29  Design & Architecture           n=1,906  sal=$3,300
+C30  Software Engineering            n=1,525  sal=$6,000
+C31  Electrical & M&E Engineering    n=2,743  sal=$3,700
+C32  Early Childhood Education       n=2,243  sal=$3,000
+C33  Business & Data Analysis        n=1,328  sal=$5,500
+C34  Warehouse & Logistics           n=1,802  sal=$2,300
+
+
+WHAT STILL NEEDS TO BE IMPLEMENTED
+=====================================
+
+Priority 1 — Core features (natural next steps after backfill)
+
+A. Role filter on the frontend
+   - Add role_cluster / role_name as a filter option on the job search / matches page
+   - API endpoint needs to accept role_cluster[] or role_name[] as query params
+   - Use role_taxonomy.json for the filter labels
+   - Can be a multi-select (user picks one or more role categories)
+
+B. Experience tier filter on the frontend
+   - Add predicted_tier as a filter (T1_Entry / T2_Junior / T3_Senior / T4_Management)
+   - Display as friendly labels: Entry Level / Junior / Senior / Management
+   - Can be pre-filled based on resume's inferred experience level
+
+C. API: expose role_cluster and predicted_tier in job responses
+   - Current job response objects probably don't include these fields
+   - Add them to the relevant GET /jobs and matching endpoints
+   - Check src/mcf/api/server.py for the job serialization
+
+Priority 2 — Multi-label role matching (more complex, high value)
+
+D. Multi-label role tagging
+   - At threshold 0.85 cosine similarity, 45% of jobs belong to 2+ role clusters
+   - Implementation: at classification time, compute similarity to all 35 centroids
+     and store all clusters above threshold (not just the nearest one)
+   - Requires a separate column (e.g. role_clusters_json TEXT array) or junction table
+   - Enables: resume scoring high on Data Science also surfaces Data Engineering jobs
+   - Key co-occurring pairs: PM<->SWE, PM<->BD, SWE<->Data, QA<->UX
+
+E. Use tier in matching score
+   - Currently matching is purely cosine similarity + recency decay
+   - Boost (or filter) match scores when candidate's inferred tier matches job's predicted_tier
+   - Candidate tier comes from the resume embedding run through lr_tier_classifier
+   - See src/mcf/api/services/matching_service.py
+
+Priority 3 — Maintenance
+
+F. Re-train classifiers when job pool changes significantly
+   - Models are trained on Apr 2026 snapshot (69k jobs)
+   - Scripts to retrain are already written (run_clustering_v2.py, run_role_clustering.py)
+   - Suggested trigger: re-train quarterly or when job pool grows >20%
+   - After retraining, replace src/mcf/models/*.pkl and run backfill again
+
+G. Consider merging similar clusters if UI feedback shows confusion
+   - C13 + C28 (both Kitchen/Culinary — same salary, different seniority)
+   - C19 + C30 (both Software — developer vs senior/embedded split)
+   - These are fine as-is for now but worth watching
+
+
+KEY NUMBERS TO REMEMBER
+=========================
+
+Tier classifier (LogisticRegression):
+  - Balanced accuracy: 0.875 (vs 0.698 for KNN)
+  - Model size: 25 kB
+  - Predict latency: 0.07 ms per 32-job batch
+
+Role classifier (K-Means k=35):
+  - Silhouette: 0.0955 (5-seed mean)
+  - Predict latency: ~0.1 ms per batch (essentially free)
+
+Multi-label threshold: 0.85
+  - 45% of jobs match 2+ role clusters at this threshold
+  - Avg 1.89 labels/job
+
+Embedding model: BAAI/bge-base-en-v1.5 (768-dim)
+  - Seniority + years experience baked into embedding text
+  - Embedding text format: "Job Title: X\nRequired Skills: ...\nSeniority: Y, N+ years experience"

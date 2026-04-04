@@ -31,6 +31,8 @@ export async function GET(request: NextRequest) {
   const min_similarity = searchParams.get('min_similarity') ?? '0'
   const max_days_old = searchParams.get('max_days_old') ?? ''
   const session_id = searchParams.get('session_id') ?? ''
+  const role_clusters = searchParams.getAll('role_cluster')
+  const predicted_tiers = searchParams.getAll('predicted_tier')
 
   const params = new URLSearchParams({
     mode,
@@ -42,6 +44,8 @@ export async function GET(request: NextRequest) {
   })
   if (max_days_old) params.set('max_days_old', max_days_old)
   if (session_id) params.set('session_id', session_id)
+  role_clusters.forEach((c) => params.append('role_cluster', c))
+  predicted_tiers.forEach((t) => params.append('predicted_tier', t))
 
   const url = `${API_BASE_URL}/api/matches?${params}`
   const authHeader = authorization!
@@ -57,6 +61,8 @@ export async function GET(request: NextRequest) {
     min_similarity,
     max_days_old,
     session_id,
+    role_clusters.join(','),
+    predicted_tiers.join(','),
   ]
 
   try {

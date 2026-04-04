@@ -37,3 +37,40 @@ ALTER TABLE candidate_embeddings ADD COLUMN embedding vector(768);
 -- CREATE INDEX IF NOT EXISTS idx_candidate_embeddings_vector
 --   ON candidate_embeddings
 --   USING hnsw (embedding vector_cosine_ops);
+
+
+ Step 4 — Rebuild the HNSW index in Supabase
+
+  Run after re-embed completes (not before — building an index on NULLs is wasteful):
+
+  CREATE INDEX IF NOT EXISTS idx_job_embeddings_vector
+    ON job_embeddings
+    USING hnsw (embedding vector_cosine_ops);
+
+  CREATE INDEX IF NOT EXISTS idx_candidate_embeddings_vector
+    ON candidate_embeddings
+    USING hnsw (embedding vector_cosine_ops);
+
+  ---
+  Step 5 — Handle candidate embeddings
+
+  All stored resume and taste-profile embeddings are 384-dim and will produce empty matches. Clear them so users are prompted to re-upload:
+
+  DELETE FROM candidate_embeddings;
+
+  Or leave them — users will just see empty matches until they re-upload their resume.
+
+  ---
+  Step 6 — Verify
+
+  -- Should return only 768
+  SELECT DISTINCT dim FROM job_embeddings;
+
+  -- Should be 0 (or close to 0 if crawl ran mid-re-embed)
+  SELECT COUNT(*) FROM job_embeddings WHERE embedding IS NULL;
+
+  ---
+  What the daily crawl does from here on
+
+  No further action needed. New jobs are automatically embedded with bge-base-en-v1.5 + the enriched seniority text. The GitHub Actions re-embed
+  workflow exists if you ever need to backfill again (e.g. another model upgrade).

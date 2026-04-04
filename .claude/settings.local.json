@@ -36,7 +36,8 @@
       "Bash(uv add:*)",
       "Bash(uv run python -c \":*)",
       "Bash(python -c \":*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(python:*)"
     ]
   }
 }

@@ -153,6 +153,7 @@ def run_incremental_crawl(
                     jobs_to_embed.append((normalized, job_text))
 
             # Phase 2: Batch embed and upsert (10–30x faster than one-by-one with GPU)
+            embedded: list[tuple[str, list[float]]] = []  # (job_uuid, embedding)
             for i in range(0, len(jobs_to_embed), batch_size):
                 batch = jobs_to_embed[i : i + batch_size]
                 texts = [jt for _, jt in batch]
@@ -164,9 +165,32 @@ def run_incremental_crawl(
                             model_name=_embedder.model_name,
                             embedding=emb,
                         )
+                        embedded.append((normalized.job_uuid, emb))
                 except Exception as e:
                     for normalized, _ in batch:
                         print(f"Warning: Failed to generate embedding for job {normalized.job_uuid}: {e}")
+
+            # Phase 3: Classify all new jobs in one batch (role cluster + experience tier + multi-label)
+            if embedded:
+                try:
+                    import numpy as np
+                    from mcf.lib.classifiers import classify_jobs, classify_jobs_multilabel
+
+                    emb_matrix = np.array([e for _, e in embedded], dtype=np.float32)
+                    classifications_raw = classify_jobs(emb_matrix)
+                    classifications = [
+                        (job_uuid, role_cluster, predicted_tier)
+                        for (job_uuid, _), (role_cluster, predicted_tier)
+                        in zip(embedded, classifications_raw)
+                    ]
+                    store.batch_upsert_job_classifications(classifications)
+
+                    multi_labels = classify_jobs_multilabel(emb_matrix)
+                    store.batch_upsert_multi_label_clusters(
+                        [(job_uuid, clusters) for (job_uuid, _), clusters in zip(embedded, multi_labels)]
+                    )
+                except Exception as e:
+                    print(f"Warning: job classification failed, skipping: {e}")
 
         store.update_daily_stats(run.run_id)
         store.delete_inactive_job_embeddings()

@@ -117,6 +117,8 @@ export const matchesApi = {
     maxDaysOld?: number,
     excludeRatedOnly = true,
     sessionId?: string,
+    roleClusters?: number[],
+    predictedTiers?: string[],
   ) => {
     const params = new URLSearchParams({
       mode,
@@ -130,6 +132,8 @@ export const matchesApi = {
       params.append('max_days_old', maxDaysOld.toString())
     }
     if (sessionId) params.append('session_id', sessionId)
+    roleClusters?.forEach((c) => params.append('role_cluster', c.toString()))
+    predictedTiers?.forEach((t) => params.append('predicted_tier', t))
 
     const { data } = await supabase.auth.getSession()
     const token = data.session?.access_token
@@ -149,7 +153,16 @@ export const matchesApi = {
       has_more: boolean
       mode: MatchMode
       session_id: string
+      candidate_tier: string | null
     }>
+  },
+}
+
+// Taxonomy API
+export const taxonomyApi = {
+  getClusters: async (): Promise<Array<{ id: number; name: string }>> => {
+    const response = await api.get('/api/jobs/taxonomy')
+    return response.data.clusters
   },
 }
 

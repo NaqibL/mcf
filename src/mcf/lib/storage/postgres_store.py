@@ -362,6 +362,25 @@ class PostgresStore(Storage):
         except psycopg2.ProgrammingError:
             pass  # table may not exist
 
+    # === Job classifications ===
+
+    def batch_upsert_job_classifications(
+        self, classifications: list[tuple[str, int, str]]
+    ) -> None:
+        if not classifications:
+            return
+        with self._cur() as cur:
+            psycopg2.extras.execute_batch(
+                cur,
+                """
+                UPDATE jobs
+                SET role_cluster = %s, predicted_tier = %s
+                WHERE job_uuid = %s
+                """,
+                [(rc, tier, uuid) for uuid, rc, tier in classifications],
+                page_size=500,
+            )
+
     # === Job embeddings ===
 
     def upsert_embedding(
@@ -551,7 +570,8 @@ class PostgresStore(Storage):
         with self._cur() as cur:
             cur.execute(
                 """
-                SELECT job_uuid, title, company_name, location, job_url, last_seen_at, skills_json
+                SELECT job_uuid, title, company_name, location, job_url, last_seen_at, skills_json,
+                       role_cluster, predicted_tier, role_clusters_json
                   FROM jobs WHERE job_uuid = ANY(%s)
                 """,
                 [uuids],
@@ -566,10 +586,50 @@ class PostgresStore(Storage):
                 "job_url": r[4],
                 "last_seen_at": r[5],
                 "skills": json.loads(r[6]) if r[6] else [],
+                "role_cluster": r[7],
+                "predicted_tier": r[8],
+                "role_clusters": list(r[9]) if r[9] else None,
             }
             for r in rows
         }
         return [by_id[uid] for uid in uuids if uid in by_id]
+
+    def get_job_uuids_for_filter(
+        self,
+        role_clusters: list[int] | None = None,
+        predicted_tiers: list[str] | None = None,
+    ) -> set[str] | None:
+        if not role_clusters and not predicted_tiers:
+            return None
+        conditions = ["is_active = TRUE"]
+        params: list = []
+        if role_clusters:
+            # Match primary cluster OR any multi-label cluster (array overlap &&)
+            conditions.append("(role_cluster = ANY(%s) OR role_clusters_json && %s::integer[])")
+            params.append(role_clusters)
+            params.append(role_clusters)
+        if predicted_tiers:
+            conditions.append("predicted_tier = ANY(%s)")
+            params.append(predicted_tiers)
+        with self._cur() as cur:
+            cur.execute(
+                f"SELECT job_uuid FROM jobs WHERE {' AND '.join(conditions)}",
+                params,
+            )
+            return {r[0] for r in cur.fetchall()}
+
+    def batch_upsert_multi_label_clusters(
+        self, data: list[tuple[str, list[int]]]
+    ) -> None:
+        if not data:
+            return
+        with self._cur() as cur:
+            psycopg2.extras.execute_batch(
+                cur,
+                "UPDATE jobs SET role_clusters_json = %s WHERE job_uuid = %s",
+                [(clusters, uuid) for uuid, clusters in data],
+                page_size=500,
+            )
 
     def create_match_session(
         self, *, user_id: str, mode: str, ranked_ids: list[str], ttl_seconds: int = 7200

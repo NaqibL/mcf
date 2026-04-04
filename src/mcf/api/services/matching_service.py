@@ -21,6 +21,7 @@ from mcf.api.active_jobs_pool_cache import (
     compute_ranked_from_pool,
     get_pool_or_fetch,
 )
+from mcf.lib.classifiers import role_name as _role_name, predict_candidate_tier
 from mcf.lib.storage.base import Storage
 
 # Pure semantic matching — skills keyword overlap removed.
@@ -40,6 +41,11 @@ _ROCCHIO_ALPHA = 0.7
 _ROCCHIO_BETA = 0.3
 _ROCCHIO_GAMMA = 0.1
 _MIN_LIKED_FOR_EXPANSION = 1
+
+# Tier boost: 5% score multiplier when job's predicted_tier matches candidate's tier.
+# Small enough to not override semantic relevance; enough to surface same-tier jobs ahead of
+# otherwise-equal cross-tier jobs.
+_TIER_BOOST = 1.05
 
 
 class MatchingService:
@@ -69,6 +75,8 @@ class MatchingService:
         exclude_rated_only: bool,
         min_similarity: float,
         max_days_old: int | None,
+        allowed_uuids: set[str] | None = None,
+        tier_boost_uuids: set[str] | None = None,
     ) -> tuple[str, list[str]]:
         """Run the cheap vector query, score, filter, and create a session.
         Returns (session_id, ranked_ids). ranked_ids are "uuid:score" strings.
@@ -92,6 +100,8 @@ class MatchingService:
 
         scored: list[tuple[float, str]] = []
         for job_uuid, distance, last_seen_at in ranked_with_meta:
+            if allowed_uuids is not None and job_uuid not in allowed_uuids:
+                continue
             if job_uuid in interacted_jobs:
                 continue
             similarity = 1.0 - distance
@@ -109,7 +119,8 @@ class MatchingService:
                 ts = last_seen_at if last_seen_at.tzinfo else last_seen_at.replace(tzinfo=timezone.utc)
                 days_old = max(0, (datetime.now(timezone.utc) - ts).days)
             recency_factor = max(_RECENCY_FLOOR, 1.0 - _RECENCY_DECAY_PER_DAY * days_old)
-            combined_score = similarity * recency_factor
+            tier_factor = _TIER_BOOST if (tier_boost_uuids is not None and job_uuid in tier_boost_uuids) else 1.0
+            combined_score = similarity * recency_factor * tier_factor
             scored.append((combined_score, job_uuid))
 
         scored.sort(reverse=True, key=lambda x: x[0])
@@ -201,7 +212,9 @@ class MatchingService:
         min_similarity: float = 0.0,
         max_days_old: int | None = None,
         session_id: str | None = None,
-    ) -> tuple[list[dict[str, Any]], int, str]:
+        role_clusters: list[int] | None = None,
+        predicted_tiers: list[str] | None = None,
+    ) -> tuple[list[dict[str, Any]], int, str, str | None]:
         """Find top matching jobs for a candidate using semantic similarity."""
         candidate_emb = self.store.get_candidate_embedding(profile_id)
         if not candidate_emb:
@@ -220,10 +233,27 @@ class MatchingService:
                 ranked_entries = session["ranked_ids"]
                 total = session["total"]
 
+        # Infer candidate's experience tier from their resume embedding (best-effort)
+        candidate_tier: str | None = None
+        try:
+            candidate_tier = predict_candidate_tier(candidate_emb)
+        except Exception:
+            pass
+
         if not ranked_entries:
             query_emb = candidate_emb
             if user_id:
                 query_emb = self._expand_query_with_interactions(candidate_emb, user_id)
+            allowed_uuids = self.store.get_job_uuids_for_filter(role_clusters, predicted_tiers)
+            # Fetch UUIDs of jobs matching the candidate's tier for the score boost
+            tier_boost_uuids: set[str] | None = None
+            if candidate_tier:
+                try:
+                    tier_boost_uuids = self.store.get_job_uuids_for_filter(
+                        predicted_tiers=[candidate_tier]
+                    )
+                except Exception:
+                    pass
             session_id, ranked_entries = self._build_session(
                 query_emb,
                 "resume",
@@ -232,6 +262,8 @@ class MatchingService:
                 exclude_rated_only,
                 min_similarity,
                 max_days_old,
+                allowed_uuids,
+                tier_boost_uuids,
             )
             total = len(ranked_entries)
 
@@ -248,6 +280,7 @@ class MatchingService:
             if not job:
                 continue
             combined_score = scores_by_uuid.get(job_uuid, 0.0)
+            rc = job.get("role_cluster")
             results.append(
                 {
                     "job_uuid": job_uuid,
@@ -259,10 +292,14 @@ class MatchingService:
                     "semantic_score": combined_score,
                     "job_skills": job.get("skills") or [],
                     "last_seen_at": job.get("last_seen_at"),
+                    "role_cluster": rc,
+                    "role_name": _role_name(rc) if rc is not None else None,
+                    "predicted_tier": job.get("predicted_tier"),
+                    "role_clusters": job.get("role_clusters"),
                 }
             )
 
-        return (results, total, session_id or "")
+        return (results, total, session_id or "", candidate_tier)
 
     # ------------------------------------------------------------------
     # Taste-profile methods
@@ -350,6 +387,8 @@ class MatchingService:
         min_similarity: float = 0.0,
         max_days_old: int | None = None,
         session_id: str | None = None,
+        role_clusters: list[int] | None = None,
+        predicted_tiers: list[str] | None = None,
     ) -> tuple[list[dict[str, Any]], int, str]:
         """Find top jobs matching the user's taste-profile embedding."""
         taste_emb = self.store.get_taste_embedding(profile_id)
@@ -366,6 +405,7 @@ class MatchingService:
                 total = session["total"]
 
         if not ranked_entries:
+            allowed_uuids = self.store.get_job_uuids_for_filter(role_clusters, predicted_tiers)
             session_id, ranked_entries = self._build_session(
                 taste_emb,
                 "taste",
@@ -374,6 +414,7 @@ class MatchingService:
                 True,  # taste always excludes only interested/not_interested
                 min_similarity,
                 max_days_old,
+                allowed_uuids,
             )
             total = len(ranked_entries)
 
@@ -390,6 +431,7 @@ class MatchingService:
             if not job:
                 continue
             combined_score = scores_by_uuid.get(job_uuid, 0.0)
+            rc = job.get("role_cluster")
             results.append(
                 {
                     "job_uuid": job_uuid,
@@ -400,6 +442,10 @@ class MatchingService:
                     "similarity_score": combined_score,
                     "job_skills": job.get("skills") or [],
                     "last_seen_at": job.get("last_seen_at"),
+                    "role_cluster": rc,
+                    "role_name": _role_name(rc) if rc is not None else None,
+                    "predicted_tier": job.get("predicted_tier"),
+                    "role_clusters": job.get("role_clusters"),
                 }
             )
 

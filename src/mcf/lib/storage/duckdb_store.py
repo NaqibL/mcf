@@ -458,6 +458,16 @@ class DuckDBStore(Storage):
             return None
         return json.loads(row[0])
 
+    def batch_upsert_job_classifications(
+        self, classifications: list[tuple[str, int, str]]
+    ) -> None:
+        if not classifications:
+            return
+        self._con.executemany(
+            "UPDATE jobs SET role_cluster = ?, predicted_tier = ? WHERE job_uuid = ?",
+            [(rc, tier, uuid) for uuid, rc, tier in classifications],
+        )
+
     def upsert_embedding_cache(
         self, *, content_hash: str, model_name: str, embed_type: str, embedding: Sequence[float]
     ) -> None:
@@ -574,7 +584,8 @@ class DuckDBStore(Storage):
             return []
         placeholders = ", ".join("?" * len(uuids))
         rows = self._con.execute(
-            f"SELECT job_uuid, title, company_name, location, job_url, last_seen_at, skills_json "
+            f"SELECT job_uuid, title, company_name, location, job_url, last_seen_at, skills_json, "
+            f"role_cluster, predicted_tier, role_clusters_json "
             f"FROM jobs WHERE job_uuid IN ({placeholders})",
             uuids,
         ).fetchall()
@@ -587,10 +598,47 @@ class DuckDBStore(Storage):
                 "job_url": r[4],
                 "last_seen_at": r[5],
                 "skills": json.loads(r[6]) if r[6] else [],
+                "role_cluster": r[7],
+                "predicted_tier": r[8],
+                "role_clusters": json.loads(r[9]) if r[9] else None,
             }
             for r in rows
         }
         return [by_id[uid] for uid in uuids if uid in by_id]
+
+    def get_job_uuids_for_filter(
+        self,
+        role_clusters: list[int] | None = None,
+        predicted_tiers: list[str] | None = None,
+    ) -> set[str] | None:
+        if not role_clusters and not predicted_tiers:
+            return None
+        conditions = ["is_active = TRUE"]
+        params: list = []
+        if role_clusters:
+            # DuckDB: check single-label only (role_clusters_json is TEXT/JSON, no native array ops)
+            placeholders = ", ".join("?" * len(role_clusters))
+            conditions.append(f"role_cluster IN ({placeholders})")
+            params.extend(role_clusters)
+        if predicted_tiers:
+            placeholders = ", ".join("?" * len(predicted_tiers))
+            conditions.append(f"predicted_tier IN ({placeholders})")
+            params.extend(predicted_tiers)
+        rows = self._con.execute(
+            f"SELECT job_uuid FROM jobs WHERE {' AND '.join(conditions)}",
+            params,
+        ).fetchall()
+        return {r[0] for r in rows}
+
+    def batch_upsert_multi_label_clusters(
+        self, data: list[tuple[str, list[int]]]
+    ) -> None:
+        if not data:
+            return
+        self._con.executemany(
+            "UPDATE jobs SET role_clusters_json = ? WHERE job_uuid = ?",
+            [(json.dumps(clusters), uuid) for uuid, clusters in data],
+        )
 
     def create_match_session(
         self, *, user_id: str, mode: str, ranked_ids: list[str], ttl_seconds: int = 7200

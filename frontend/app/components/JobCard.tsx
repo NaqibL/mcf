@@ -98,6 +98,16 @@ export const MatchCard = React.memo(function MatchCard({ match, onInteraction, l
                 </span>
               )}
               <RecencyBadge daysAgo={daysAgo} />
+              {match.role_name && (
+                <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
+                  {match.role_name}
+                </span>
+              )}
+              {match.predicted_tier && (
+                <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                  {match.predicted_tier.replace('T1_', '').replace('T2_', '').replace('T3_', '').replace('T4_', '')}
+                </span>
+              )}
             </div>
           </div>
           <ScoreBadge score={match.similarity_score} />

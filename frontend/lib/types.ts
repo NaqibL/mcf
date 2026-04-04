@@ -34,6 +34,10 @@ export interface Match {
   matched_skills?: string[]
   job_skills?: string[]
   last_seen_at?: string
+  role_cluster?: number | null
+  role_name?: string | null
+  predicted_tier?: string | null
+  role_clusters?: number[] | null
 }
 
 export interface Profile {

@@ -28,7 +28,10 @@ CREATE TABLE IF NOT EXISTS jobs (
   company_name TEXT,
   location TEXT,
   job_url TEXT,
-  skills_json TEXT
+  skills_json TEXT,
+  role_cluster INTEGER,
+  predicted_tier TEXT,
+  role_clusters_json TEXT  -- JSON array of all cluster IDs at cosine >= 0.85
 );
 
 -- Job run status
