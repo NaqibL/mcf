@@ -195,6 +195,27 @@ def _salary_percentiles(salaries: list[int]) -> tuple[int, int, int]:
 # ---------------------------------------------------------------------------
 
 
+@app.get("/api/jobs/taxonomy")
+def get_job_taxonomy():
+    """Return role cluster taxonomy: list of {id, name} sorted by id."""
+    import mcf.lib.classifiers as _cls
+    _cls._load()
+    return {
+        "clusters": [
+            {"id": k, "name": v}
+            for k, v in sorted((_cls._taxonomy or {}).items())
+        ]
+    }
+
+
+@app.get("/api/jobs/interested")
+def get_interested_jobs(user_id: str = Depends(get_current_user)):
+    """Return jobs the user has marked as interested, ordered by most recent first."""
+    store = get_store()
+    jobs = store.get_interested_jobs(user_id=user_id)
+    return {"jobs": jobs}
+
+
 @app.post("/api/jobs/{job_uuid}/interact")
 def mark_interaction(
     job_uuid: str,
@@ -235,14 +256,6 @@ def get_job_detail(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
-
-
-@app.get("/api/jobs/interested")
-def get_interested_jobs(user_id: str = Depends(get_current_user)):
-    """Return jobs the user has marked as interested, ordered by most recent first."""
-    store = get_store()
-    jobs = store.get_interested_jobs(user_id=user_id)
-    return {"jobs": jobs}
 
 
 # ---------------------------------------------------------------------------
@@ -656,19 +669,6 @@ def compute_taste(user_id: str = Depends(get_current_user)):
     if settings.enable_response_cache:
         invalidate_matches_for_user(user_id)
     return result
-
-
-@app.get("/api/jobs/taxonomy")
-def get_job_taxonomy():
-    """Return role cluster taxonomy: list of {id, name} sorted by id."""
-    import mcf.lib.classifiers as _cls
-    _cls._load()
-    return {
-        "clusters": [
-            {"id": k, "name": v}
-            for k, v in sorted((_cls._taxonomy or {}).items())
-        ]
-    }
 
 
 @app.get("/api/matches")
