@@ -115,8 +115,11 @@ class CORSEnforcementMiddleware(BaseHTTPMiddleware):
         try:
             response = await call_next(request)
         except Exception as exc:
+            import traceback
             from starlette.responses import JSONResponse
 
+            if not isinstance(exc, HTTPException):
+                logging.error("Unhandled exception on %s: %s\n%s", request.url.path, exc, traceback.format_exc())
             status = exc.status_code if isinstance(exc, HTTPException) else 500
             detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
             response = JSONResponse(status_code=status, content={"detail": detail})
