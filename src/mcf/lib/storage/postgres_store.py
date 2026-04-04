@@ -522,6 +522,7 @@ class PostgresStore(Storage):
                   JOIN job_embeddings e ON e.job_uuid = j.job_uuid
                  WHERE j.is_active = TRUE
                    AND (e.embedding_json IS NOT NULL OR e.embedding IS NOT NULL)
+                   AND (e.dim IS NULL OR e.dim >= 500)
                 """,
             )
             rows = cur.fetchall()
