@@ -85,6 +85,14 @@ def _verify_admin_or_secret(
 async def lifespan(app: FastAPI):
     global _store
     _store = _make_store()
+    # Pre-warm the active jobs pool so the first match request isn't cold.
+    if settings.enable_active_jobs_pool_cache:
+        try:
+            from mcf.api.active_jobs_pool_cache import get_pool_or_fetch as _warm_pool
+            _warm_pool(_store)
+            logger.info("Active jobs pool warmed on startup")
+        except Exception:
+            logger.warning("Failed to warm active jobs pool on startup", exc_info=True)
     yield
     if _store:
         _store.close()

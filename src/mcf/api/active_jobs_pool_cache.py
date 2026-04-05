@@ -3,6 +3,10 @@
 Similar to matches_cache: in-memory, TTL 15 min. Reduces DB round-trips when
 get_active_job_ids_ranked is called frequently (e.g. many match requests).
 
+Also caches a pre-stacked numpy matrix of all embeddings so that
+compute_ranked_from_pool can use a single vectorised matrix multiply instead
+of a per-job Python loop.
+
 Invalidate when: crawl completes, jobs deactivated, embeddings updated.
 """
 
@@ -22,28 +26,33 @@ logger = logging.getLogger(__name__)
 
 ACTIVE_JOBS_POOL_TTL_SECONDS = 900  # 15 minutes
 
-# (pool_data, expires_at)
-# pool_data: list of (job_uuid, embedding, last_seen_at)
-_cache: tuple[list[tuple[str, list[float], datetime | None]], float] | None = None
+# (pool_data, embeddings_matrix, expires_at)
+# pool_data:          list of (job_uuid, embedding, last_seen_at)
+# embeddings_matrix:  pre-stacked float32 array, shape (n_jobs, dim)
+_cache: tuple[list[tuple[str, list[float], datetime | None]], np.ndarray, float] | None = None
 
 
-def get_cached() -> list[tuple[str, list[float], datetime | None]] | None:
-    """Return cached pool if valid, else None."""
+def get_cached() -> tuple[list[tuple[str, list[float], datetime | None]], np.ndarray] | tuple[None, None]:
+    """Return (pool, matrix) if cache is valid, else (None, None)."""
     global _cache
     if _cache is None:
-        return None
-    pool, expires_at = _cache
+        return None, None
+    pool, matrix, expires_at = _cache
     if time.monotonic() > expires_at:
         _cache = None
-        return None
-    return pool
+        return None, None
+    return pool, matrix
 
 
 def set_cached(pool: list[tuple[str, list[float], datetime | None]]) -> None:
-    """Store pool in cache."""
+    """Store pool in cache and pre-compute the stacked embedding matrix."""
     global _cache
+    if pool:
+        matrix = np.array([emb for _, emb, _ in pool], dtype=np.float32)
+    else:
+        matrix = np.empty((0, 0), dtype=np.float32)
     expires_at = time.monotonic() + ACTIVE_JOBS_POOL_TTL_SECONDS
-    _cache = (pool, expires_at)
+    _cache = (pool, matrix, expires_at)
     logger.debug("active jobs pool cache set: %d jobs", len(pool))
 
 
@@ -59,30 +68,48 @@ def compute_ranked_from_pool(
     pool: list[tuple[str, list[float], datetime | None]],
     query_embedding: list[float],
     limit: int | None = None,
+    matrix: np.ndarray | None = None,
 ) -> list[tuple[str, float, datetime | None]]:
     """Compute (job_uuid, cosine_distance, last_seen_at) sorted by distance ASC.
 
-    Returns all jobs when limit is None (default), so the session covers the full
-    active-jobs pool rather than an arbitrary cap.
+    Uses a single vectorised matrix multiply when *matrix* is supplied (the
+    pre-stacked array from the cache).  Falls back to building the matrix on
+    the fly when not supplied, which is still faster than the previous per-job
+    loop because numpy's array construction is C-level.
+
+    Returns all jobs when limit is None (default).
     """
     if not pool:
         return []
     query_vec = np.array(query_embedding, dtype=np.float32)
-    scored = []
-    for uuid, emb, last_seen_at in pool:
-        emb_arr = np.array(emb, dtype=np.float32)
-        cosine_sim = float(np.dot(query_vec, emb_arr))
-        distance = 1.0 - cosine_sim
-        scored.append((uuid, distance, last_seen_at))
+
+    if matrix is None or matrix.ndim < 2 or matrix.shape[0] == 0:
+        matrix = np.array([emb for _, emb, _ in pool], dtype=np.float32)
+
+    # One BLAS dot-product call for all jobs at once.
+    sims = matrix @ query_vec  # shape (n_jobs,)
+    distances = 1.0 - sims
+
+    scored = [
+        (job_uuid, float(dist), last_seen_at)
+        for (job_uuid, _, last_seen_at), dist in zip(pool, distances)
+    ]
     scored.sort(key=lambda x: x[1])
     return scored[:limit] if limit is not None else scored
 
 
-def get_pool_or_fetch(store: Storage) -> list[tuple[str, list[float], datetime | None]]:
-    """Return cached pool or fetch from store and cache. Uses store.get_active_jobs_pool()."""
-    cached = get_cached()
-    if cached is not None:
-        return cached
+def get_pool_or_fetch(
+    store: Storage,
+) -> tuple[list[tuple[str, list[float], datetime | None]], np.ndarray | None]:
+    """Return (pool, matrix) — either from cache or freshly fetched.
+
+    The caller should pass *matrix* to compute_ranked_from_pool to avoid
+    re-building it on every request.
+    """
+    pool, matrix = get_cached()
+    if pool is not None:
+        return pool, matrix
     pool = store.get_active_jobs_pool()
     set_cached(pool)
-    return pool
+    pool, matrix = get_cached()
+    return pool, matrix  # type: ignore[return-value]

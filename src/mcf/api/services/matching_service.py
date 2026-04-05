@@ -82,8 +82,8 @@ class MatchingService:
         Returns (session_id, ranked_ids). ranked_ids are "uuid:score" strings.
         Use 2k pool: applicants typically apply to ~200 max; 2k gives 10x headroom for filters and Load More."""
         if settings.enable_active_jobs_pool_cache:
-            pool = get_pool_or_fetch(self.store)
-            ranked_with_meta = compute_ranked_from_pool(pool, embedding)  # no cap — all active jobs
+            pool, matrix = get_pool_or_fetch(self.store)
+            ranked_with_meta = compute_ranked_from_pool(pool, embedding, matrix=matrix)  # no cap — all active jobs
         else:
             ranked_with_meta = self.store.get_active_job_ids_ranked(embedding, limit=50_000)
         if not ranked_with_meta:

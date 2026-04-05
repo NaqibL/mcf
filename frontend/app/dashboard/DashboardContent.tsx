@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { Database, BarChart2 } from 'lucide-react'
 import { dashboardApi } from '@/lib/api'
-import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import { Layout } from '../components/layout'
 import NavUserActions from '../components/NavUserActions'
 import {
@@ -103,9 +102,6 @@ export function DashboardContent({ initialSummary, initialJobsOverTime }: Dashbo
   useEffect(() => {
     const load = async () => {
       try {
-        if (isSupabaseConfigured) {
-          await supabase.auth.getSession()
-        }
         const data = await dashboardApi.getChartsStatic()
         setJobsByCategory((data.jobs_by_category || []).filter((x) => x.category !== 'Unknown'))
         setJobsByEmploymentType((data.jobs_by_employment_type || []).filter((x) => x.employment_type !== 'Unknown'))
